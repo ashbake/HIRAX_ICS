@@ -1,0 +1,27 @@
+2025-05-25T21:23:07 [cSBIG.py:219 - connect()] INFO: Connecting to Maxim
+2025-05-25T21:23:09 [cSBIG.py:223 - connect()] INFO: Connecting to camera
+2025-05-25T21:28:48 [cSBIG.py:219 - connect()] INFO: Connecting to Maxim
+2025-05-25T21:28:48 [cSBIG.py:223 - connect()] INFO: Connecting to camera
+2025-05-25T21:28:49 [cSBIG.py:231 - connect()] INFO: Preventing the camera from disconnecting when we exit
+2025-05-25T21:28:49 [cSBIG.py:236 - connect()] INFO: Preventing maxim from closing upon exit
+2025-05-25T21:28:49 [cSBIG.py:106 - setBinning()] INFO: Camera binning set to 2x2
+2025-05-25T21:28:49 [cSBIG.py:90 - setFrame()] INFO: Camera set to full-frame mode
+2025-05-25T21:28:55 [cSBIG.py:140 - coolCCD()] INFO: Cooling camera to -5 C , Amb Temp= 6.110000133514404
+2025-05-25T21:28:55 [cSBIG.py:141 - coolCCD()] INFO: Waiting for Cooler Power to Stabalize Below 35%
+2025-05-25T21:30:13 [cSBIG.py:106 - setBinning()] INFO: Camera binning set to 1x1
+2025-05-25T21:30:48 [cSBIG.py:74 - Expose()] INFO: Exposing Dark frame...
+2025-05-25T21:30:49 [cSBIG.py:78 - Expose()] INFO: Dark frame exposure and download complete!
+2025-05-25T21:31:18 [cSBIG.py:90 - setFrame()] INFO: Camera set to full-frame mode
+2025-05-25T21:31:23 [cSBIG.py:74 - Expose()] INFO: Exposing Dark frame...
+2025-05-25T21:31:24 [cSBIG.py:78 - Expose()] INFO: Dark frame exposure and download complete!
+2025-05-25T21:31:59 [cSBIG.py:116 - saveImage()] ERROR: Cannot save file
+2025-05-25T21:33:10 [cSBIG.py:66 - Expose()] INFO: Exposing light frame...
+2025-05-25T21:33:12 [cSBIG.py:70 - Expose()] INFO: Light frame exposure and download complete!
+2025-05-25T21:33:15 [cSBIG.py:66 - Expose()] INFO: Exposing light frame...
+2025-05-25T21:33:16 [cSBIG.py:70 - Expose()] INFO: Light frame exposure and download complete!
+2025-05-25T21:34:12 [cSBIG.py:66 - Expose()] INFO: Exposing light frame...
+2025-05-25T21:34:13 [cSBIG.py:70 - Expose()] INFO: Light frame exposure and download complete!
+2025-05-25T21:34:32 [cSBIG.py:66 - Expose()] INFO: Exposing light frame...
+2025-05-25T21:34:34 [cSBIG.py:70 - Expose()] INFO: Light frame exposure and download complete!
+2025-05-25T22:33:26 [cSBIG.py:66 - Expose()] INFO: Exposing light frame...
+2025-05-25T22:33:27 [cSBIG.py:70 - Expose()] INFO: Light frame exposure and download complete!

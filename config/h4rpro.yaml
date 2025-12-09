@@ -1,0 +1,11 @@
+
+#h4rpro setup
+
+# Folders
+log_dir: "../logs"
+data_dir: "C:/Users/ashle/Documents/Data"
+name: "H4RPro"
+
+# Exposure settings
+h4rpro_coeffs: [-4.96439687e-11, -1.50967200e-6, 6.02120089e-2, 5.77925772e2]
+spectra_to_read: 5

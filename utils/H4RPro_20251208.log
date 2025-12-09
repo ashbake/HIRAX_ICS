@@ -1,0 +1,13 @@
+2025-12-08 19:19:01 | INFO     | root | setup_logging:78 | ================================================================================
+2025-12-08 19:19:01 | INFO     | root | setup_logging:79 | Astronomy Instrumentation Control System - Logging Initialized
+2025-12-08 19:19:01 | INFO     | root | setup_logging:80 | Log level: DEBUG
+2025-12-08 19:19:01 | INFO     | root | setup_logging:82 | Log file: H4RPro_20251208.log
+2025-12-08 19:19:01 | INFO     | root | setup_logging:83 | ================================================================================
+2025-12-08 19:19:02 | INFO     | root | _read_all_serial_numbers:102 | Reading H4RPRO Serial Numbers
+2025-12-08 19:19:02 | WARNING  | root | connect:71 | Using old wavelength coefficients for H4RPro
+2025-12-08 19:19:02 | INFO     | root | read_spectra:160 | Reading and correcting H4RPRO Spectrum
+2025-12-08 19:19:02 | INFO     | root | read_spectra:160 | Reading and correcting H4RPRO Spectrum
+2025-12-08 19:19:03 | INFO     | root | read_spectra:160 | Reading and correcting H4RPRO Spectrum
+2025-12-08 19:19:03 | INFO     | root | read_spectra:160 | Reading and correcting H4RPRO Spectrum
+2025-12-08 19:19:03 | INFO     | root | read_spectra:160 | Reading and correcting H4RPRO Spectrum
+2025-12-08 19:19:03 | INFO     | root | writeSpectraToCSV:125 | Writing H4RPRO data to 2025-12-09T03.19.03_dark.csv

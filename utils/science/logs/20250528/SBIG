@@ -1,0 +1,14 @@
+2025-05-28T21:14:45 [cSBIG.py:223 - connect()] INFO: Connecting to Maxim
+2025-05-28T21:14:47 [cSBIG.py:227 - connect()] INFO: Connecting to camera
+2025-05-28T21:14:49 [cSBIG.py:233 - connect()] INFO: Camera failed to connect
+2025-05-28T21:14:49 [cSBIG.py:180 - shutDown()] INFO: Disconnecting and Quitting CAMERA
+2025-05-28T21:14:49 [cSBIG.py:210 - recover()] WARNING: Camera failed to connect; restarting maxim
+2025-05-28T21:14:49 [cSBIG.py:184 - restartmaxim()] INFO: Killing maxim
+2025-05-28T21:15:09 [cSBIG.py:223 - connect()] INFO: Connecting to Maxim
+2025-05-28T21:15:10 [cSBIG.py:227 - connect()] INFO: Connecting to camera
+2025-05-28T21:15:11 [cSBIG.py:237 - connect()] INFO: Preventing the camera from disconnecting when we exit
+2025-05-28T21:15:11 [cSBIG.py:242 - connect()] INFO: Preventing maxim from closing upon exit
+2025-05-28T21:15:11 [cSBIG.py:108 - setBinning()] INFO: Camera binning set to 1x1
+2025-05-28T21:15:11 [cSBIG.py:92 - setFrame()] INFO: Camera set to full-frame mode
+2025-05-28T21:15:17 [cSBIG.py:142 - coolCCD()] INFO: Cooling camera to 0 C , Amb Temp= 15.75
+2025-05-28T21:15:17 [cSBIG.py:143 - coolCCD()] INFO: Waiting for Cooler Power to Stabalize Below 35%

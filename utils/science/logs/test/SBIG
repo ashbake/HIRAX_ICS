@@ -1,0 +1,8 @@
+2025-04-04T17:56:33 [cSBIG.py:218 - connect()] INFO: Connecting to Maxim
+2025-04-04T17:56:35 [cSBIG.py:222 - connect()] INFO: Connecting to camera
+2025-04-04T17:56:38 [cSBIG.py:230 - connect()] INFO: Preventing the camera from disconnecting when we exit
+2025-04-04T17:56:38 [cSBIG.py:235 - connect()] INFO: Preventing maxim from closing upon exit
+2025-04-04T17:56:38 [cSBIG.py:105 - setBinning()] INFO: Camera binning set to 1x1
+2025-04-04T17:56:38 [cSBIG.py:89 - setFrame()] INFO: Camera set to full-frame mode
+2025-04-04T17:56:43 [cSBIG.py:139 - coolCCD()] INFO: Cooling camera to -5 C , Amb Temp= 4.809999942779541
+2025-04-04T17:56:43 [cSBIG.py:140 - coolCCD()] INFO: Waiting for Cooler Power to Stabalize Below 35%
