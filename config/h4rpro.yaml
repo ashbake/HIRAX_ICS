@@ -1,7 +1,7 @@
 
 #h4rpro setup
 
-# Folders
+# Common
 log_dir: "../logs"
 data_dir: "C:/Users/ashle/Documents/Data"
 name: "H4RPro"
