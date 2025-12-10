@@ -6,10 +6,16 @@ from win32com.client import Dispatch
 import logging
 import subprocess 
 import sys, os
+from pathlib import Path
+from cLogging import setup_logging
+import logging, yaml
 
 ERROR = True
 NOERROR = False
  
+ # default config file
+config_file = str(Path(__file__).resolve().parent.parent / "config" / "sbig.yaml")
+
 ##------------------------------------------------------------------------------
 ## Class: cCamera
 ##   import cSBIG 
@@ -18,43 +24,33 @@ NOERROR = False
 ##------------------------------------------------------------------------------
 
 
-class cSBIGmaxim:
-    def __init__(self,night):
+class cSBIG:
+    def __init__(self,night, source, config_file=config_file):
         # Define attributes
-        # hard code things since CAMAL is simple. can put into config file later
-        self.dataPath  = None
-        self.finaldataPath = None
-        self.night     = night
-        self.name      = 'SBIG'
-        self.program   = 'maxim'
-        self.xbin = 1
-        self.ybin = 1
+        # read from config file, loads default config_file
+        with open(config_file, 'r') as f:
+            self.config = yaml.safe_load(f)
+
+        self.source    = source # feed it a source string for the header
+        self.night     = night # YYYYMMDD
+        self.name      = self.config['name'] # should be H4Rpro
+
+        # make data and log dirs have sub direction of night string
+        self.data_dir = Path(self.config['data_dir']) / self.night / self.name
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        self.log_dir = Path(self.config['log_dir']) / self.night
+        self.data_dir.mkdir(parents=True, exist_ok=True)
+
+        # initiate logger
+        self.logger = setup_logging(log_dir=self.log_dir,
+                                    log_name=self.name,
+                                    log_level=logging.DEBUG)
         
-        # set up logger
-        logger_name = self.name
-        log_path = 'logs/' + night
-        log_file = log_path + '/' + self.name
-
-        if not os.path.exists(log_path): os.makedirs(log_path)
-
-        # setting up imager logger
-        fmt = "%(asctime)s [%(filename)s:%(lineno)s - %(funcName)s()] %(levelname)s: %(message)s"
-        datefmt = "%Y-%m-%dT%H:%M:%S"
-
-        self.logger = logging.getLogger(logger_name)
-        formatter = logging.Formatter(fmt,datefmt=datefmt)
-        formatter.converter = time.gmtime
-        
-        fileHandler = logging.FileHandler(log_file, mode='a')
-        fileHandler.setFormatter(formatter)
-
-        console = logging.StreamHandler()
-        console.setFormatter(formatter)
-        console.setLevel(logging.INFO)
-        
-        self.logger.setLevel(logging.DEBUG)
-        self.logger.addHandler(fileHandler)
-        self.logger.addHandler(console)
+        # pull out detector settings
+        self.xbin = self.config['xbin']
+        self.ybin = self.config['ybin']
+        self.set_temperature = self.config['set_temperature']
 
     def Expose(self,exptime,exptype):
         """
@@ -135,8 +131,7 @@ class cSBIGmaxim:
                 settemp = 5
             else:
                 settemp = ambTemp - 20
-                # logging.info('Temperature too hot..not cooling camera')
-
+            
             self.CAMERA.TemperatureSetpoint = settemp
             time.sleep(5)
             self.logger.info("Cooling camera to " + str(settemp) + " C , Amb Temp= " + str(ambTemp))
@@ -152,9 +147,6 @@ class cSBIGmaxim:
                     fails += 0
                     print('failed to cool once')
                 if fails > 2:
-                    mail.send('CAMERA Cooler Power Never Settled','The temperature of the camera never'
-                        'settled to a cooler power less than 35%. Check out why'
-                        'Continuing anyways.')
                     print('temperature didnt reach setpoint')
                     break
             tt = time.time()
@@ -211,7 +203,6 @@ class cSBIGmaxim:
             self.restartmaxim()
         elif self.nfailed == 4:
             self.logger.error('Camera failed to connect!') 
-            mail.send("Camera " + str(self.num) + " failed to connect","please do something",level="serious")
             sys.exit()
 
     def connect(self, cooler=True):

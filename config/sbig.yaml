@@ -1,0 +1,12 @@
+
+#h4rpro setup
+ 
+# Common
+log_dir: "../logs"
+data_dir: "C:/Users/ashle/Documents/Data"
+name: "SBIG"
+
+# Exposure settings
+xbin: 1
+ybin: 1
+set_temperature: -5

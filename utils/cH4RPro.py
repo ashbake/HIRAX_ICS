@@ -1,5 +1,6 @@
 
-import os, csv, time, sys
+import os, csv, sys
+from datetime import datetime
 import numpy as np
 import matplotlib.pylab as plt
 from pathlib import Path
@@ -17,14 +18,13 @@ from oceandirect.OceanDirectAPI import OceanDirectAPI, OceanDirectError, Spectro
 odapi = OceanDirectAPI()
 
 # default config file
-config_file = str(Path(__file__).resolve().parent.parent / "config" / "h4rpro.yaml")
+config_file = str(Path.cwd().resolve().parent / "config" / "h4rpro.yaml")
 
 
 class cH4RPro:
-    def __init__(self,night,source, config=config_file):
+    def __init__(self,night, source, config_file=config_file):
         # Define attributes
-        # read from config file
-        # Load config
+        # read from config file, loads default config_file
         with open(config_file, 'r') as f:
             self.config = yaml.safe_load(f)
 
@@ -171,7 +171,7 @@ class cH4RPro:
             time.sleep(0.1)
 
         # save name of CSV for spectrum
-        self.last_time_tag = time.strftime("%Y-%m-%dT%H.%M.%S", time.gmtime())
+        self.last_time_tag = datetime.utcnow().strftime("%Y-%m-%dT%H.%M.%S.%f")
         self.csv_file_name  = Path(self.data_dir)  / f"{self.last_time_tag}_{self.source}.csv"
     
         # save

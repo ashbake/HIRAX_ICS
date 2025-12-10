@@ -76,7 +76,7 @@ def setup_logging(
     
     # Log the initialization
     logger.info("=" * 80)
-    logger.info("Astronomy Instrumentation Control System - Logging Initialized")
+    logger.info("HIRAX Control System - Logging Initialized")
     logger.info(f"Log level: {logging.getLevelName(log_level)}")
     if log_to_file:
         logger.info(f"Log file: {log_path / log_filename}")

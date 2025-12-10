@@ -1,0 +1,10 @@
+
+#h4rpro setup
+ 
+# Common
+log_dir: "../logs"
+data_dir: "C:/Users/ashle/Documents/Data"
+name: "Guider"
+
+# Detector settings
+file_format: "FITS"
