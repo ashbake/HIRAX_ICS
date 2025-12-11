@@ -69,6 +69,7 @@ class cThermal:
         #try:
         self.alldata = self._process_data(rawdata,self.alldata)
         
+        self.write(self.csv_file_name, rawdata)
 
     def _process_data(self, rawdata, alldata):
         """
@@ -105,7 +106,7 @@ class cThermal:
         
         return alldata
 
-    def write(self, output_file_name):
+    def write(self, output_file_name, data):
         """
         write data to file, if file exists it will append
 
@@ -119,18 +120,18 @@ class cThermal:
         output_file = os.path.join(self.data_dir, output_file_name)
         if not (os.path.isfile(output_file)):
             file = open(output_file, 'w')
-            hdr = '#elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,\
-                    temp3a, temp3b, temp5, temp8, temp9, temp10\n'
+            hdr = '#elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,'\
+                    'temp3a, temp3b, temp5, temp8, temp9, temp10\n'
             file.write(hdr)
         else:
             file = open(output_file, 'a')
         
-        file.write(self.alldata)
+        file.write(data)
 
         file.close()
 
 if __name__=='__main__':
-    night = 'test'
+    night = datetime.utcnow().strftime("%Y%m%d")
     test = cThermal(night)
     test.connect()
     # need to figure out port, how does this work with usb hub?
