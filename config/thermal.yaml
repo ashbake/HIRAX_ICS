@@ -1,0 +1,11 @@
+
+#h4rpro setup
+ 
+# Common
+log_dir: "../logs"
+data_dir: "C:/Users/ashle/Documents/Data"
+name: "thermal"
+
+# Exposure settings
+COM_Port: "COM1"
+baud_rate: 9600
