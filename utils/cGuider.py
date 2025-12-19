@@ -1,415 +1,250 @@
 from datetime import datetime,timezone
-import logging, os
-from pathlib import Path
 import numpy as np
-from astropy.io import fits
+import sys
+from pathlib import Path
+import telnetlib
+from datetime import datetime, timezone
+from scipy import signal
+from PIL import Image
 
-import PySpin
-
-from cLogging import setup_logging
-import logging, yaml
-
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
-
-config_file = str(Path.cwd().resolve().parent / "config" / "guider.yaml")
+sys.path.insert(0, str(Path.cwd().resolve().parent / "utils" ))
+from cFLIR import cFLIR
 
 
-class cGuider:
-    def __init__(self, night, source, config_file=config_file):
-        # Define attributes
-        # read from config file, loads default config_file
-        with open(config_file, 'r') as f:
-            self.config = yaml.safe_load(f)
+class cGuider(cFLIR):
+    def __init__(self,night):
+        super().__init__(night) # do this to get logger and config 
 
-        self.source    = source # feed it a source string for the header
-        self.night     = night # YYYYMMDD
-        self.name      = self.config['name'] # should be H4Rpro
-        self.file_format  = self.config['file_format']
-
-        # make data and log dirs have sub direction of night string
-        self.data_dir = Path(self.config['data_dir']) / self.night / self.name
-        self.data_dir.mkdir(parents=True, exist_ok=True)
-
-        self.log_dir = Path(self.config['log_dir']) / self.night
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-
-        # initiate logger
-        self.logger = setup_logging(log_dir=self.log_dir,
-                                    log_name=self.name,
-                                    log_level=logging.DEBUG)
-        
+        self.logger.info('Trying to connect to TCS')
 
     def connect(self):
-        # Retrieve singleton reference to system object
-        self.system = PySpin.System.GetInstance()
-
-        # Get current library version
-        version = self.system.GetLibraryVersion()
-        print('Library version: %d.%d.%d.%d' % (version.major, version.minor, version.type, version.build))
-
-        # Retrieve list of cameras from the system
-        self.cam_list = self.system.GetCameras()
-        num_cameras = self.cam_list.GetSize()
-        self.logger.info('Number of cameras detected: %d' % num_cameras)
-
-        if num_cameras == 0:
-            # Clear camera list before releasing system
-            self.cam_list.Clear()
-
-            # Release system instance
-            self.system.ReleaseInstance()
-
-            self.logger.error('Not enough cameras! Exiting')
-            return False
-        
-        self.cam = self.cam_list[0] # we just have one Flir camera so try taking 0th index
-
+        """connect camera parent and make telnet connection"""
         try:
-            # Initialize camera
-            self.cam.Init()
+            self.session  = telnetlib.Telnet(self.config['HOST_IP'],self.config['PORT'],self.config['TIMEOUT'])
+        except:
+            self.logger.error(f"Couldnt make telnet connection to HOST {self.config['HOST_IP']} at port {self.config['PORT']}")
 
-            # Print device info
-            self.device_info = self._get_device_info()
+    def _load_image(self,filename,subframe=500):
+        """
+        load filename (includes path) (if not using image from memory)
 
-        except PySpin.SpinnakerException as ex:
-                print('Error: %s' % ex)
-                return False
+        filename (str): 
+
+        subframe (int): npixels of subframe box to take around center
+        """
+
+        f = np.array(Image.open(filename))
+        nx,ny = np.shape(f)
+        xcent,ycent = nx//2, ny//2
+        r = subframe//2
+
+        return f[xcent-r:xcent+r,ycent-r:ycent+r]
+
+    def _find_centroid(self,data):
+        """
+        Input: loaded data, Output: x,y center of aperture
+
+        **assumes no other source in frame (or at least that source of interest is the brightest!!)***
+        """
+        # Convolve image with gaussian kernel
+        kernel = np.outer(signal.windows.gaussian(70,8), signal.windows.gaussian(70,8))
+        blurred = signal.fftconvolve(data, kernel, mode='same')
+
+        # Take the normalized STD along x,y axes
+        xstd = np.std(blurred,axis=0)
+        ystd = np.std(blurred,axis=1)
+        xstdn = (xstd - np.median(xstd[100:300]))/max(xstd)
+        ystdn = (ystd - np.median(ystd[100:300]))/max(ystd)
+
+        # Determine center by maximum. Eventually add check that there's only one source!
+        try: x,y = np.where(xstdn == max(xstdn))[0][0], np.where(ystdn == max(ystdn))[0][0]
+        except IndexError:
+            x,y = 0,0
+
+        return x,y
+
+    def _calc_offset(self,xcentroid,ycentroid,Nx, Ny,xref=0,yref=0):
+        """
+        computes the offset
+
+        inputs:
+        -------
+        xcentroid - float
+            centroid of the PSF in x position
+        ycentroid - float
+            centroid of the PSF in y position
+        Nx  = int
+            size of subframe in x axis
+        Ny - int
+            size of subframe in y axis
+        xref - float (default 0)
+            target position w.r.t. center of frame x axis
+        yref - float (default 0)
+            target position w.r.t. center of frame y axis
+
+        returns
+        -------
+        x and y offsets to apply            
+        
+        xref and yref are defined based on center of image (Nx//2, Ny//2)
+        so use subframe to know this
+
+        xref and yref default to 0 (reference is the center!)
+        """
+        return xcentroid - xref - Nx//2, ycentroid - yref - Ny//2
+
+    def _calc_plate_scale(self,mag=1.5,pixel_size=3.45):
+        """
+        use focal lengths to calculate rough plate scale at guider
+        mag: ratio of first lens to guide camera lens (150:100 or 150:80)
+        pixel_size: pixel size in microns (3.45 for guider)
+        """
+        mag = 150/80 # 150 is focal dist of guide lens, 80 mm is collimator
+        # accidentally had 100 has focal distance of first lens
+        F_pf = 16.76*10**3 # mm , Focal length Hale telescope
+        ps_pf = 206265 / (16.76*10**3) # arcsec/mm  at prime focus
+        ps_final = ps_pf / mag
+
+        pixel_size_mm = pixel_size / 1000
+        ps_final_pixel = ps_final * pixel_size_mm
+
+        return ps_final_pixel # arcsec/pixel
+
+    def _pixel_to_arcsec(self,dx,dy):
+        """
+        convert pixel shift to arseconds using plate scale
+        """
+        plate_scale = self._calc_plate_scale(mag=1.5) # arsec/pixel
+        return dx * plate_scale, dy * plate_scale
 
     def disconnect(self):
-        # Deinitialize camera
+        """disconnect all - telnet and camera"""
         try:
-            self.cam.DeInit()
-
-            del self.cam
-
-            # Clear camera list before releasing system
-            self.cam_list.Clear()
-
-            # Release system instance
-            self.system.ReleaseInstance()
-
-            self.logger.info('Disconnected Guide Camera')
+            self.session.close()
+            self.logger.info('Closed telnet connection')
         except:
-            self.logger.error('Could not disconnect camera')
-
-    def expose(self,exposure_time,header_keys={},writeToFile=True):
-        if not self._configure_exposure(exposure_time):
-            return False
-
-        # Acquire images
-        if not self.acquire_images(header_keys,writeToFile): self.logger.warning('FLIR guider image acquisition Failed.')
-
-        # Reset exposure
-        self._reset_exposure()
-
-    def _get_device_info(self):
-        """
-        This function prints the device information of the camera from the transport
-        layer; please see NodeMapInfo example for more in-depth comments on printing
-        device information from the nodemap.
-
-        :param cam: Camera to get device information from.
-        :type cam: CameraPtr
-        :return: True if successful, False otherwise.
-        :rtype: bool
-
-        Should print out:
-        DeviceID: 2CDDA350840A_0AC89101_FFFF0000_0AC80181
-        DeviceSerialNumber: 22053898
-        DeviceVendorName: FLIR
-        DeviceModelName: Blackfly S BFS-PGE-88S6M
-        DeviceType: GigEVision
-        DeviceDisplayName: FLIR Blackfly S BFS-PGE-88S6M
-        DeviceAccessStatus: OpenReadWrite
-        DeviceVersion: 2103.0.343.0
-        DeviceUserID:
-        DeviceDriverVersion: PgrLwf.sys : 2.7.3.507
-        DeviceIsUpdater: 0
-        GevCCP: ControlAccess
-        GUIXMLLocation: Device
-        GUIXMLPath: Input.xml
-        GenICamXMLLocation: Device
-        GenICamXMLPath:
-        GevDeviceIPAddress: 0xac89101
-        GevDeviceSubnetMask: 0xffff0000
-        GevDeviceMACAddress: 0x2cdda350840a
-        GevDeviceGateway: 0xac80181
-        DeviceLinkSpeed: 1000
-        GevVersionMajor: 1
-        GevVersionMinor: 2
-        GevDeviceModeIsBigEndian: 1
-        GevDeviceReadAndWriteTimeout: 100000
-        GevDeviceMaximumRetryCount: 3
-        GevDevicePort: 29200
-        GevDeviceDiscoverMaximumPacketSize: Node not readable
-        GevDeviceMaximumPacketSize: 1500
-        GevDeviceIsWrongSubnet: 0
-        GevDeviceAutoForceIP: 0
-        GevDeviceForceIP: 0
-        GevDeviceForceIPAddress: 0xac89101
-        GevDeviceForceSubnetMask: 0xffff0000
-        GevDeviceForceGateway: 0xac80181
-        """
-
-        print('*** DEVICE INFORMATION ***\n')
-
-        try:
-            nodemap = self.cam.GetTLDeviceNodeMap()
-
-            node_device_information = PySpin.CCategoryPtr(nodemap.GetNode('DeviceInformation'))
-            save_info = {}
-            if PySpin.IsAvailable(node_device_information) and PySpin.IsReadable(node_device_information):
-                features = node_device_information.GetFeatures()
-                for feature in features:
-                    node_feature = PySpin.CValuePtr(feature)
-                    if print:
-                        print('%s: %s' % (node_feature.GetName(),
-                                        node_feature.ToString() if PySpin.IsReadable(node_feature) else 'Node not readable'))
-                    save_info[node_feature.GetName()] = (node_feature.ToString() 
-                                                         if PySpin.IsReadable(node_feature) 
-                                                         else 'Node not readable')
-            else:
-                print('Device control information not available.')
-
-        except PySpin.SpinnakerException as ex:
-            print('Error: %s' % ex.message)
-            return False
-
-        return save_info
-    
-    def _configure_exposure(self,exposure_time):
-        """
-        This function configures a custom exposure time. Automatic exposure is turned
-        off in order to allow for the customization, and then the custom setting is
-        applied.
-
-        :param cam: Camera to configure exposure for.
-        :type cam: CameraPtr
-        :return: True if successful, False otherwise.
-        :rtype: bool
-        """
-
-        self.logger.info(f'Configuring Exposure Time to {exposure_time}us')
-
-        try:
-            result = True
-
-            # Turn off automatic exposure mode
-            #
-            # *** NOTES ***
-            # Automatic exposure prevents the manual configuration of exposure
-            # times and needs to be turned off for this example. Enumerations
-            # representing entry nodes have been added to QuickSpin. This allows
-            # for the much easier setting of enumeration nodes to new values.
-            #
-            # The naming convention of QuickSpin enums is the name of the
-            # enumeration node followed by an underscore and the symbolic of
-            # the entry node. Selecting "Off" on the "ExposureAuto" node is
-            # thus named "ExposureAuto_Off".
-            #
-            # *** LATER ***
-            # Exposure time can be set automatically or manually as needed. This
-            # example turns automatic exposure off to set it manually and back
-            # on to return the camera to its default state.
-            try:
-                if self.cam.ExposureAuto.GetAccessMode() != PySpin.RW:
-                    self.logger.error('Unable to disable automatic exposure. Aborting...')
-                    return False
-
-                self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
-            except:
-                self.logger.error('Could not configure exposure time')
-                return False
-            # Set exposure time manually; exposure time recorded in microseconds
-            #
-            # *** NOTES ***
-            # Notice that the node is checked for availability and writability
-            # prior to the setting of the node. In QuickSpin, availability and
-            # writability are ensured by checking the access mode.
-            #
-            # Further, it is ensured that the desired exposure time does not exceed
-            # the maximum. Exposure time is counted in microseconds - this can be
-            # found out either by retrieving the unit with the GetUnit() method or
-            # by checking SpinView.
-
-            if self.cam.ExposureTime.GetAccessMode() != PySpin.RW:
-                print('Unable to set exposure time. Aborting...')
-                return False
-
-            # Ensure desired exposure time does not exceed the maximum
-            if exposure_time > self.cam.ExposureTime.GetMax():
-                self.logger.warning('Exposure time is greater than the maximum allowed. Capping to Max.')
-            exposure_time_to_set = min(self.cam.ExposureTime.GetMax(), exposure_time)
-            self.cam.ExposureTime.SetValue(exposure_time_to_set)
-            self.logger.info('Guider Shutter time set to %s us...\n' % exposure_time_to_set)
-
-        except PySpin.SpinnakerException as ex:
-            print('Error: %s' % ex)
-            result = False
-
-        return result
-
-    def _reset_exposure(self):
-        """
-        This function returns the camera to a normal state by re-enabling automatic exposure.
-
-        :param cam: Camera to reset exposure on.
-        :type cam: CameraPtr
-        :return: True if successful, False otherwise.
-        :rtype: bool
-        """
-        try:
-            result = True
-
-            # Turn automatic exposure back on
-            #
-            # *** NOTES ***
-            # Automatic exposure is turned on in order to return the camera to its
-            # default state.
-
-            if self.cam.ExposureAuto.GetAccessMode() != PySpin.RW:
-                print('Unable to enable automatic exposure (node retrieval). Non-fatal error...')
-                return False
-
-            self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Continuous)
-
-            print('Automatic exposure enabled...')
-
-        except PySpin.SpinnakerException as ex:
-            print('Error: %s' % ex)
-            result = False
-
-        return result
-
-    def acquire_images(self,header_keys={},writeToFile=True):
-        """
-        This function acquires and saves images from a device; please see
-        Acquisition example for more in-depth comments on the acquisition of images.
-
-        :param cam: Camera to acquire images from.
-        :type cam: CameraPtr
-        :return: True if successful, False otherwise.
-        :rtype: bool
-        """
-        print('*** IMAGE ACQUISITION ***')
-
-        try:
-            result = True
-
-            # Set acquisition mode to continuous
-            if self.cam.AcquisitionMode.GetAccessMode() != PySpin.RW:
-                print('Unable to set acquisition mode to continuous. Aborting...')
-                return False
-
-            self.cam.AcquisitionMode.SetValue(PySpin.AcquisitionMode_Continuous)
-            print('Acquisition mode set to continuous...')
-
-            # Begin acquiring images
-            self.cam.BeginAcquisition()
-
-            print('Acquiring images...')
-
-            # Get device serial number for filename
-            device_serial_number = ''
-            if self.cam.TLDevice.DeviceSerialNumber is not None and self.cam.TLDevice.DeviceSerialNumber.GetAccessMode() == PySpin.RO:
-                device_serial_number = self.cam.TLDevice.DeviceSerialNumber.GetValue()
-
-                print('Device serial number retrieved as %s...' % device_serial_number)
-
-            # Get the value of exposure time to set an appropriate timeout for GetNextImage
-            timeout = 0
-            if self.cam.ExposureTime.GetAccessMode() == PySpin.RW or self.cam.ExposureTime.GetAccessMode() == PySpin.RO:
-                # The exposure time is retrieved in µs so it needs to be converted to ms to keep consistency with the unit being used in GetNextImage
-                timeout = (int)(self.cam.ExposureTime.GetValue() / 1000 + 1000)
-            else:
-                print ('Unable to get exposure time. Aborting...')
-                return False
-
-            # Retrieve, convert, and save images
-            try:
-                # Retrieve next received image and ensure image completion
-                # By default, GetNextImage will block indefinitely until an image arrives.
-                # In this example, the timeout value is set to [exposure time + 1000]ms to ensure that an image has enough time to arrive under normal conditions
-                image_result = self.cam.GetNextImage(timeout)
-                self.last_time_tag = datetime.utcnow().strftime("%Y-%m-%dT%H.%M.%S.%f")
-
-                if image_result.IsIncomplete():
-                    print('Image incomplete with image status %d...' % image_result.GetImageStatus())
-
-                else:
-                    # Print image information
-                    width = image_result.GetWidth()
-                    height = image_result.GetHeight()
-                    print('Grabbed Image width = %d, height = %d' % (width, height))
-
-                    # Convert image to Mono8
-                    self.image_converted = image_result#.Convert(PySpin.PixelFormat_Mono8)
-                    
-                    raw_data = self.image_converted.GetData().astype(np.uint16)
-                    self.raw_data = raw_data.reshape(2160, 4096)
-
-                    if writeToFile:  self.writeToFile(header_keys)
-                    
-                # Release image
-                image_result.Release()
-
-            except PySpin.SpinnakerException as ex:
-                print('Error: %s' % ex)
-                result = False
-
-            # End acquisition
-            self.cam.EndAcquisition()
-
-        except PySpin.SpinnakerException as ex:
-            print('Error: %s' % ex)
-            result = False
-
-        return result
-    
-    def writeToFile(self, header_keys={}):
-        """Save data to file
+            self.logger.warning("Coulnd't close telnet connection" )
         
-        uses pyspin functionalities to save as tiff or accesses data in 
-        local memory to save to fits based on file_format
+        # disconnect camera
+        #super().disconnect()
 
-        header_keys - dic (optional) defaults to {}
-            adds dictionary keys and values to fits file header
+    def offset_to_TCS(self, dx_arcs, dy_arcs):
         """
-        if self.file_format=='TIFF':
-            # Create a unique filename
-            filename = str(self.data_dir / f"guide_{self.source}_{self.last_time_tag}.tiff")
+        send offset to TCS???
+        save ascii strign with command according to P200_tcs_remote_cmds.txt
 
-            # Save image
-            self.image_converted.Save(filename)
+        PT (two arguments):  move telescope in RA and dec simultaneously by
+        distance given in first and second arguments, respectively.  Distances are
+        in arcseconds.  Positive values move east and north.  Rates of moves are
+        set by MRATES - see above.  Moves are precessed to the display equinox.
+        Valid range: -6000 to 6000 arcsec in each axis.
 
-            print('Image saved at %s' % filename)
-        elif self.file_format=='FITS':
+        i think that (x) down (in default python plot of guide image) is down so positive 
+        dx is west and positive dy is south --> flip signs. x and y are good
 
-            filename = str(self.data_dir / f"guide_{self.source}_{self.last_time_tag}.fits")
-            hdu = fits.PrimaryHDU(self.raw_data)
+        test this ultimately bc not sure if "positive values move east and north" means
+        the stars or the telescope. probs the telescope wich would make sign flight correct
+        """
+        EW_tcs = dy_arcs      # (up/down on guide image, short axis)
+        NS_tcs = -1 * dx_arcs # (left/right on guide image, long axis)
+        cmd = 'PT %s %s \r' %(EW_tcs, NS_tcs)
 
-            for key, value in self.device_info.items():
-                hdu.header[key] = value
-            hdu.header['GTIME'] = self.last_time_tag
-            
-            # add user input header keywords
-            for hdr_key in header_keys.keys():
-                hdu.header[hdr_key] = header_keys[hdr_key]
+        out = self.session.write(cmd.encode('ascii'))
+        self.logger.info(f'Moved telescope by {EW_tcs} EW and {NS_tcs} NS')
+        return out
 
-            hdu.writeto(filename)
-            self.logger.info(f"Wrote guide image to {filename}")
+    def plot_summary(self,data,xcent,ycent,dx,dy,dx_arcs,dy_arcs):
+        """
+        plot summary of image and shift
+        mark x,y reference and summarize shift in title
+        """
+        import matplotlib.pylab as plt
+
+        plt.figure(-99)
+        plt.clf()
+        plt.imshow(data)
+        plt.scatter(xcent,ycent,marker='x',c='r')
+        plt.title('EW: %s NS: %s' %(round(dy_arcs,2), round(-1*dx_arcs,2)))
+        plt.arrow(xcent,ycent,-1*dx,-1*dy,length_includes_head=True,head_width=10)
+        plt.pause(0.1)
+
+    def run(self,data,subframe=None,ploton=False):
+        """
+        run centroid finder and push offset to telescope
+        inputs:
+        -------
+        data - guide camera image
+        """
+        # data comes from memory now, but can edit this later to load file if data is string(filename)
+        #data = load_image(filename,subframe=subframe)
+
+        # apply subframe
+        if subframe is not None:
+            x0,xf,y0,yf = subframe
+            self.subdata = data[x0:xf, y0:yf]
         else:
-            self.logger.error('File format in yaml file should be FITS or TIFF')
+            self.subdata = data
 
+        Nx,Ny = np.shape(self.subdata)
 
-if __name__=='__main__':
+        # compute reference offset from center to aim for ( for now 0,0 but can add function for DAR for example)
+        self.xref,self.yref = 0,0
+        
+        # fit centroid offset in arcsec
+        xcentroid, ycentroid = self._find_centroid(self.subdata)
+        dx, dy               = self._calc_offset(xcentroid,ycentroid, Nx, Ny,self.xref,self.yref) # *** note: x plots as y axis in python
+        self.dx_arcs, self.dy_arcs     = self._pixel_to_arcsec(dx,dy) 
+
+        # send to TCS if less than 10 arcsec
+        if np.abs(self.dx_arcs) < 10 and np.abs(self.dx_arcs) < 10: 
+            self.offset_to_TCS(np.round(self.dx_arcs,2), np.round(self.dy_arcs,2)) #send this somewhere?
+
+        if ploton: self.plot_summary(self.subdata,Nx//2,Ny//2,dx,dy,dx_arcs,dy_arcs)
+
+    def get_telemetry(self):
+        """
+        Get telemetry from telnet connection to telescope
+        
+        saves telemetry values to dictionary that feeds expose() command to save to FITS header
+
+        REQPOS = "UTC = ddd hh:mm:ss.s, LST = hh:mm:ss.s\nRA = hh:mm:ss.ss, DEC = [+/-]dd:mm:ss.s, HA = [W/E]hh:mm:ss.s\nair mass = aa.aaa"
+
+        """
+        self.header_keys = {}
+        REQPOS = self.session.write('REQPOS'.encode('ascii'))
+        NAME   = self.session.write('NAME'.encode('ascii'))
+
+        # format
+        utclst, radecha, airmass = REQPOS.split('\n')
+        utc, lst = utclst.split(',')
+        ra, dec, ha  = radecha.split(',')
+
+        # save
+        self.header_keys['name'] = NAME.strip('\n').strip('NAME =') # TODO check all this works with real TCS output
+        self.header_keys['UTC'] = utc.strip('UTC =')
+        self.header_keys['LST'] = lst.strip(' LST =')
+        self.header_keys['RA']  = ra.strip('RA =')
+        self.header_keys['DEC'] = dec.strip('DEC =')
+        self.header_keys['HA']  = ha.strip(' HA =')
+        self.header_keys['airmass']  = ra.strip('airmass =')
+
+        return self.header_keys
+    
+
+def main():
+    """example run"""
     night = datetime.now(timezone.utc).strftime("%Y%m%d")
-    source = 'dark'
-    test = cGuider(night, source)
+    test = cGuider(night)
+    
+    camera = cFLIR(night)
+    camera.connect()
+    camera.expose(1e5,writeToFile=False)
 
-    test.connect()
-    exp_time =  .01 * 1e6
-    test.expose(exp_time) # 50 microseconds
-    test.expose(2*exp_time) # 50 microseconds
+    test.run(camera.raw_data)
     test.disconnect()
+
+
+    
+if __name__=='__main__':
+    main()
     
