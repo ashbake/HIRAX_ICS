@@ -7,5 +7,5 @@ data_dir: "C:/Users/ashle/Documents/Data"
 name: "thermal"
 
 # Exposure settings
-COM_Port: "COM1"
+COM_Port: "COM5"
 baud_rate: 9600

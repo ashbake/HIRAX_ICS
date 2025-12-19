@@ -33,7 +33,7 @@ class cSBIG:
 
         self.source    = source # feed it a source string for the header
         self.night     = night # YYYYMMDD
-        self.name      = self.config['name'] # should be H4Rpro
+        self.name      = self.config['name'] # should be SBIG
 
         # make data and log dirs have sub direction of night string
         self.data_dir = Path(self.config['data_dir']) / self.night / self.name

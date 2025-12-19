@@ -140,7 +140,7 @@ def ProcData(alldata):
 
 
 # Replace 'COM4' with your Arduino's serial port
-serial_port = 'COM4'
+serial_port = 'COM5'
 baud_rate = 9600
 #os.chdir('./temperature_data')
 
@@ -149,7 +149,7 @@ time.sleep(2)  # Wait for the serial connection to initialize
 alldata={} # initilize alldata
 
 time_start = Time.now()
-output_file  = './temperature_data/arduino_temp_output_jd%s.csv'%time_start.jd
+output_file  = './thermal/temperature_data/arduino_temp_output_jd%s.csv'%time_start.jd
 
 try:
     while True:

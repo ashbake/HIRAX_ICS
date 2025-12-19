@@ -3,7 +3,7 @@ import logging, os
 from pathlib import Path
 import numpy as np
 from astropy.io import fits
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 
 import serial 
@@ -41,19 +41,25 @@ class cThermal:
     def connect(self):
         # Retrieve singleton reference to system object
         # Replace 'COM4' with your Arduino's serial port
-        serial_port = self.config['COM_Port']
-        baud_rate   = self.config['baud_rate'] # should be 9600
+        try:
+            serial_port = self.config['COM_Port']
+            baud_rate   = self.config['baud_rate'] # should be 9600
 
-        self.ser = serial.Serial(serial_port, baud_rate)
-        time.sleep(2)  # Wait for the serial connection to initialize
+            self.ser = serial.Serial(serial_port, baud_rate)
+            time.sleep(2)  # Wait for the serial connection to initialize
 
-        # make one csv file for all reads until close connection - name file here
-        self.start_time_tag = datetime.utcnow().strftime("%Y-%m-%dT%H.%M.%S.%f")
-        self.csv_file_name  = Path(self.data_dir)  / f"{self.name}_{self.start_time_tag}.csv"
-        self.logger.info(f"Thermal logging will save to {self.csv_file_name}")
-        
-        # initiate memory for data array
-        self.alldata = {}
+            # make one csv file for all reads until close connection - name file here
+            self.start_time_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H.%M.%S.%f")
+            self.csv_file_name  = Path(self.data_dir)  / f"{self.name}_{self.start_time_tag}.csv"
+            self.logger.info(f"Thermal logging will save to {self.csv_file_name}")
+            # initiate memory for data array
+            self.alldata = {}
+
+            return True
+        except:
+            self.logger.error(f"Failed to connect")
+            return False
+       
 
     def disconnect(self):
         """disconnect from serial port"""
@@ -130,8 +136,38 @@ class cThermal:
 
         file.close()
 
+    def plot(self):
+        pass
+
 if __name__=='__main__':
-    night = datetime.utcnow().strftime("%Y%m%d")
+    night = datetime.now(timezone.utc).strftime("%Y%m%d")
     test = cThermal(night)
-    test.connect()
-    # need to figure out port, how does this work with usb hub?
+
+    try:
+        # connect camera
+        success = test.connect()
+        iter = 0
+        
+        if success: 
+            while True:
+                # Step 1 Capture image
+                test.read_data()
+
+                # Iterate frame number and repeat loop
+                iter += 1
+                print(f"Reading thermal data {iter}", end='\r')  
+        else:
+            print('No Camera Detected') 
+    except KeyboardInterrupt:
+        print(f"\n\nStopped after {iter} frames")
+        
+    except Exception as e:
+        print(f"\n\nError: {e}")
+        
+    finally:
+        # Always cleanup
+        print("Disconnecting camera...")
+        test.disconnect()
+        print(f"Session complete. {iter} frames saved to {test.data_dir}")
+
+

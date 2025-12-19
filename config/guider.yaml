@@ -3,8 +3,18 @@
  
 # Common
 log_dir: "../logs"
-data_dir: "C:/Users/ashle/Documents/Data"
+data_dir: "C:/Users/abaker/Documents/Data"
 name: "Guider"
 
-# Detector settings
+# Save settings
 file_format: "FITS"
+
+# for run_guiding telnet
+HOST_IP: 198.202.125.194
+PORT: 49200
+TIMEOUT: 100
+
+# for run_guiding centroiding details
+subframe: 1500
+ref_x: 0
+ref_y: 0

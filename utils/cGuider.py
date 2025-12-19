@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime,timezone
 import logging, os
 from pathlib import Path
 import numpy as np
@@ -31,7 +31,7 @@ class cGuider:
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
         self.log_dir = Path(self.config['log_dir']) / self.night
-        self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
 
         # initiate logger
         self.logger = setup_logging(log_dir=self.log_dir,
@@ -77,22 +77,27 @@ class cGuider:
 
     def disconnect(self):
         # Deinitialize camera
-        self.cam.DeInit()
+        try:
+            self.cam.DeInit()
 
-        del self.cam
+            del self.cam
 
-        # Clear camera list before releasing system
-        self.cam_list.Clear()
+            # Clear camera list before releasing system
+            self.cam_list.Clear()
 
-        # Release system instance
-        self.system.ReleaseInstance()
+            # Release system instance
+            self.system.ReleaseInstance()
 
-    def expose(self,exposure_time):
+            self.logger.info('Disconnected Guide Camera')
+        except:
+            self.logger.error('Could not disconnect camera')
+
+    def expose(self,exposure_time,header_keys={},writeToFile=True):
         if not self._configure_exposure(exposure_time):
             return False
 
         # Acquire images
-        if not self.acquire_images(): self.logger.warning('FLIR guider image acquisition Failed.')
+        if not self.acquire_images(header_keys,writeToFile): self.logger.warning('FLIR guider image acquisition Failed.')
 
         # Reset exposure
         self._reset_exposure()
@@ -184,7 +189,7 @@ class cGuider:
         :rtype: bool
         """
 
-        print('*** CONFIGURING EXPOSURE ***\n')
+        self.logger.info(f'Configuring Exposure Time to {exposure_time}us')
 
         try:
             result = True
@@ -206,13 +211,15 @@ class cGuider:
             # Exposure time can be set automatically or manually as needed. This
             # example turns automatic exposure off to set it manually and back
             # on to return the camera to its default state.
+            try:
+                if self.cam.ExposureAuto.GetAccessMode() != PySpin.RW:
+                    self.logger.error('Unable to disable automatic exposure. Aborting...')
+                    return False
 
-            if self.cam.ExposureAuto.GetAccessMode() != PySpin.RW:
-                self.logger.error('Unable to disable automatic exposure. Aborting...')
+                self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
+            except:
+                self.logger.error('Could not configure exposure time')
                 return False
-
-            self.cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
-
             # Set exposure time manually; exposure time recorded in microseconds
             #
             # *** NOTES ***
@@ -274,7 +281,7 @@ class cGuider:
 
         return result
 
-    def acquire_images(self):
+    def acquire_images(self,header_keys={},writeToFile=True):
         """
         This function acquires and saves images from a device; please see
         Acquisition example for more in-depth comments on the acquisition of images.
@@ -336,9 +343,13 @@ class cGuider:
                     print('Grabbed Image width = %d, height = %d' % (width, height))
 
                     # Convert image to Mono8
-                    self.image_converted = image_result.Convert(PySpin.PixelFormat_Mono8)
-                    self.writeToFile()
+                    self.image_converted = image_result#.Convert(PySpin.PixelFormat_Mono8)
+                    
+                    raw_data = self.image_converted.GetData().astype(np.uint16)
+                    self.raw_data = raw_data.reshape(2160, 4096)
 
+                    if writeToFile:  self.writeToFile(header_keys)
+                    
                 # Release image
                 image_result.Release()
 
@@ -355,8 +366,15 @@ class cGuider:
 
         return result
     
-    def writeToFile(self):
-        """uses pyspin functionalities to save as tiff"""
+    def writeToFile(self, header_keys={}):
+        """Save data to file
+        
+        uses pyspin functionalities to save as tiff or accesses data in 
+        local memory to save to fits based on file_format
+
+        header_keys - dic (optional) defaults to {}
+            adds dictionary keys and values to fits file header
+        """
         if self.file_format=='TIFF':
             # Create a unique filename
             filename = str(self.data_dir / f"guide_{self.source}_{self.last_time_tag}.tiff")
@@ -366,9 +384,6 @@ class cGuider:
 
             print('Image saved at %s' % filename)
         elif self.file_format=='FITS':
-            """accesses data in local memory to save to fits"""
-            raw_data = self.image_converted.GetData().astype(np.uint16)
-            self.raw_data = raw_data.reshape(2160, 4096)
 
             filename = str(self.data_dir / f"guide_{self.source}_{self.last_time_tag}.fits")
             hdu = fits.PrimaryHDU(self.raw_data)
@@ -376,14 +391,19 @@ class cGuider:
             for key, value in self.device_info.items():
                 hdu.header[key] = value
             hdu.header['GTIME'] = self.last_time_tag
+            
+            # add user input header keywords
+            for hdr_key in header_keys.keys():
+                hdu.header[hdr_key] = header_keys[hdr_key]
 
             hdu.writeto(filename)
+            self.logger.info(f"Wrote guide image to {filename}")
         else:
             self.logger.error('File format in yaml file should be FITS or TIFF')
 
 
 if __name__=='__main__':
-    night = '20251209'
+    night = datetime.now(timezone.utc).strftime("%Y%m%d")
     source = 'dark'
     test = cGuider(night, source)
 
@@ -392,3 +412,4 @@ if __name__=='__main__':
     test.expose(exp_time) # 50 microseconds
     test.expose(2*exp_time) # 50 microseconds
     test.disconnect()
+    

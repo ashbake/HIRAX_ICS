@@ -1,9 +1,9 @@
 
 #h4rpro setup
-
+ 
 # Common
 log_dir: "../logs"
-data_dir: "C:/Users/ashle/Documents/Data"
+data_dir: "C:/Users/abaker/Documents/Data"
 name: "H4RPro"
 
 # Exposure settings

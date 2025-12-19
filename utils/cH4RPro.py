@@ -1,6 +1,7 @@
 
 import os, csv, sys
 from datetime import datetime
+import time
 import numpy as np
 import matplotlib.pylab as plt
 from pathlib import Path
@@ -182,11 +183,8 @@ class cH4RPro:
 
 
 if __name__ == '__main__':
-    config = {}
-    config['log_dir'] = './'
-    config['data_dir'] = './'
-    config['h4rpro_coeffs'] = [-4.96439687e-11, -1.50967200e-6, 6.02120089e-2, 5.77925772e2]
-    h4rpro  = cH4RPro(night='20251208', source='dark')#,config=config)
+    night = datetime.utcnow().strftime("%Y%m%d")
+    h4rpro  = cH4RPro(night=night, source='dark')#,config=config)
     h4rpro.connect()
 
     t_sec             = .02
