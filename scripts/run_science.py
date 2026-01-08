@@ -1,3 +1,5 @@
+# usage 
+# python run_science.py 'test' 0.2
 import  sys, argparse,time
 
 from pathlib import Path
@@ -8,28 +10,39 @@ from cSBIG import cSBIG
 
 # Parse User Inputs
 parser = argparse.ArgumentParser()
-parser.add_argument('source', help='Target Name[str]')
-parser.add_argument('exp_time', help='Exposure Time in seconds [float]')
-parser.add_argument('--interval', type=float, default=0,
-                    help='Time between captures')
-args = parser.parse_args()
+try:
+    parser.add_argument('source', default='test', type=str,help='Target Name[str]')
+    parser.add_argument('exp_time', default=0, type=float, help='Exposure Time in seconds [float]')
+    parser.add_argument('--interval', type=float, default=0,
+                        help='Time between captures')
+    args = parser.parse_args()
+except:
+    args = parser.parse_args()
+    args.exp_time = 0
+    args.source= 'test'
+    args.interval=0
 
 # Determine night string for logging and folder creation
 night = datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
 def main():
-    camera = cSBIG(night)
+    camera = cSBIG(night, args.source)
+    camera.connect()
 
     try:
         # connect camera
-        success = camera.Expose()
+        # exptype - 1 for science, 0 for bias
+        exptype=0 if args.exp_time ==0 else 1
+        success = camera.Expose(args.exp_time, exptype)
         iter = 0
-        
+        time0 = time.time()
         if success: 
             while True:
                 # Step 1 Capture image
-                camera.read_data()
+
+                camera.Expose(args.exp_time, exptype)
+                #camera.saveImage()
 
                 time.sleep(args.interval)
 
@@ -40,6 +53,7 @@ def main():
             print('No Camera Detected') 
     except KeyboardInterrupt:
         print(f"\n\nStopped after {iter} frames")
+        print(time0 - time.time())
         
     except Exception as e:
         print(f"\n\nError: {e}")
@@ -52,3 +66,4 @@ def main():
 
 if __name__=="__main__":
     main()
+    #pass

@@ -3,11 +3,10 @@ import numpy as np
 import sys
 from pathlib import Path
 import telnetlib
-from datetime import datetime, timezone
 from scipy import signal
 from PIL import Image
 
-sys.path.insert(0, str(Path.cwd().resolve().parent / "utils" ))
+sys.path.insert(0, str(Path(__file__).resolve() ))
 from cFLIR import cFLIR
 
 

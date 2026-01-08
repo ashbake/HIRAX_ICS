@@ -1,9 +1,6 @@
 """
 Simple GUI for displaying camera images with exposure control and peak flux display.
 Includes subframe selection and guiding controls.
-
-Curtesy of Claude
-Need to put in run_guiding.py functionality into this
 """
 
 import tkinter as tk
@@ -12,10 +9,15 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from matplotlib.figure import Figure
+from pathlib import Path
 from matplotlib.patches import Rectangle
 import threading
-import time
+import time, sys
+from datetime import datetime, timezone
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "utils" ))
+from cFLIR import cFLIR
+from cGuider import cGuider
 
 class CameraGUI:
     def __init__(self, root):
@@ -23,22 +25,61 @@ class CameraGUI:
         self.root.title("Camera Image Viewer with Guiding")
         self.root.geometry("1000x750")
         
+        # Set background color to light green-blue
+        self.root.configure(bg='#D4F1F4')  # Light cyan/turquoise
+        
         # Camera simulation parameters
         self.exposure_time = 2.0
         self.capturing = False
         self.guiding_active = False
         self.current_image = None
-        
+        self.camera_connected = False
+        self.source_name = ""
+
         # Subframe parameters (x, y, width, height)
         self.subframe_enabled = False
-        self.subframe = [128, 128, 256, 256]  # Default subframe
-        self.full_frame_size = 512
+        self.subframe = [2049, 1080, 256, 256]  # Default subframe
+        self.full_frame_size = [4096, 2160]
         
         # Create GUI elements
         self._create_widgets()
         
     def _create_widgets(self):
         """Create all GUI widgets"""
+        
+        # Top info bar with date, source, and connection status
+        info_frame = ttk.Frame(self.root, padding=5)
+        info_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+        
+        # Date display
+        self.current_night = datetime.now(timezone.utc).strftime("%Y%m%d")
+        ttk.Label(info_frame, text="Date:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=5)
+        self.date_label = ttk.Label(info_frame, text=self.current_night, font=("Arial", 10))
+        self.date_label.pack(side=tk.LEFT, padx=5)
+        
+        # Source name entry
+        ttk.Label(info_frame, text="Source:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(20, 5))
+        self.source_var = tk.StringVar(value=self.source_name) # default value
+        self.source_entry = ttk.Entry(info_frame, textvariable=self.source_var, width=20)
+        self.source_entry.pack(side=tk.LEFT, padx=5)
+        
+        # Camera connection status
+        ttk.Label(info_frame, text="Camera:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(20, 5))
+        self.camera_status_label = ttk.Label(
+            info_frame, 
+            text="DISCONNECTED", 
+            foreground="red",
+            font=("Arial", 10, "bold")
+        )
+        self.camera_status_label.pack(side=tk.LEFT, padx=5)
+        
+        # Connect/Disconnect button
+        self.connect_button = ttk.Button(
+            info_frame,
+            text="Connect Camera",
+            command=self.toggle_camera_connection
+        )
+        self.connect_button.pack(side=tk.LEFT, padx=5)
         
         # Control Panel Frame
         control_frame = ttk.LabelFrame(self.root, text="Controls", padding=10)
@@ -75,6 +116,16 @@ class CameraGUI:
             command=self.toggle_continuous
         )
         self.continuous_check.grid(row=0, column=3, padx=5, pady=5)
+        
+        # Continuous capture checkbox
+        self.write_var = tk.BooleanVar(value=False)
+        self.write_check = ttk.Checkbutton(
+            control_frame,
+            text="Write to File",
+            variable=self.write_var,
+            command=None
+        )
+        self.write_check.grid(row=0, column=4, padx=5, pady=5)
         
         # Row 1: Subframe controls
         self.subframe_var = tk.BooleanVar(value=False)
@@ -200,9 +251,10 @@ class CameraGUI:
         image_frame = ttk.Frame(self.root)
         image_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=5)
         
-        # Create matplotlib figure
-        self.figure = Figure(figsize=(8, 6), dpi=100)
+        # Create matplotlib figure with matching background
+        self.figure = Figure(figsize=(8, 6), dpi=100, facecolor='#D4F1F4')
         self.ax = self.figure.add_subplot(111)
+        self.ax.set_facecolor('#D4F1F4')  # Match plot background
         self.ax.set_title("Camera Image")
         self.ax.set_xlabel("X (pixels)")
         self.ax.set_ylabel("Y (pixels)")
@@ -221,6 +273,38 @@ class CameraGUI:
         # Initialize with blank image
         self._display_blank_image()
         
+    def toggle_camera_connection(self):
+        """Toggle camera connection"""
+        if self.camera_connected:
+            # Disconnect camera
+            self.camera.disconnect()
+            self.camera_connected = False
+            self.camera_status_label.config(text="DISCONNECTED", foreground="red")
+            self.connect_button.config(text="Connect Camera")
+            self.capture_button.config(state=tk.DISABLED)
+            self.status_label.config(text="Camera disconnected", foreground="orange")
+            
+            # Stop guiding if active
+            if self.guiding_active:
+                self.toggle_guiding()
+        else:
+            # Connect camera
+            try:
+                # Here you would actually connect to your camera
+                self.camera = cFLIR(self.current_night)
+                self.camera.connect()
+
+                # For now, simulate connection
+                #time.sleep(0.5)  # Simulate connection delay
+                
+                self.camera_connected = True
+                self.camera_status_label.config(text="CONNECTED", foreground="green")
+                self.connect_button.config(text="Disconnect Camera")
+                self.capture_button.config(state=tk.NORMAL)
+                self.status_label.config(text="Camera connected successfully", foreground="green")
+            except Exception as e:
+                self.status_label.config(text=f"Connection failed: {e}", foreground="red")
+    
     def on_mouse_move(self, event):
         """Handle mouse movement over image to display pixel coordinates and flux"""
         if event.inaxes != self.ax or self.current_image is None:
@@ -350,11 +434,26 @@ class CameraGUI:
             if not self.continuous_var.get():
                 self.continuous_var.set(True)
                 self.capture_image()
+            
+            # uncomment to start actual guiding
+            # connect to TCS and start guiding instance
+            try:
+                self.guider = cGuider(self.current_night)
+                self.guider.connect()
+            except:
+                self.status_label.config(text="Could Not Connect to TCS", foreground="red")
+
         else:
             self.guiding_button.config(text="Start Guiding")
             self.guiding_status_label.config(text="Guiding: OFF", foreground="red")
             self.status_label.config(text="Guiding stopped", foreground="orange")
             self.guide_error_label.config(text="N/A")
+            # disconnect from TCS
+            try:
+                self.guider.disconnect()
+            except:
+                self.status_label.config(text="Could Not Disconnect from TCS", foreground="red")
+
         
     def simulate_camera_capture(self, exposure_time):
         """
@@ -369,7 +468,7 @@ class CameraGUI:
             x, y, w, h = self.subframe
             size_x, size_y = w, h
         else:
-            size_x, size_y = self.full_frame_size, self.full_frame_size
+            size_x, size_y = self.full_frame_size[0], self.full_frame_size[1]
         
         # Generate simulated image with stars
         image = np.random.normal(100, 10, (size_y, size_x))  # Background noise
@@ -391,7 +490,9 @@ class CameraGUI:
         
     def capture_image(self):
         """Capture a single image"""
-        if self.capturing:
+        if self.capturing or not self.camera_connected:
+            if not self.camera_connected:
+                self.status_label.config(text="Error: Camera not connected", foreground="red")
             return
             
         self.capturing = True
@@ -410,13 +511,27 @@ class CameraGUI:
         """Background thread for image capture"""
         try:
             # Simulate or actual camera capture
-            image = self.simulate_camera_capture(self.exposure_time)
+            # image = self.simulate_camera_capture(self.exposure_time)
+            exp_time =  self.exposure_time * 1e6 # convert to microseconds
+            self.camera.expose(exp_time,source=self.source_var.get(), writeToFile=self.write_var.get()) #  microseconds
+           
+            # apply subframe
+            if self.subframe_var.get():
+                x, y, w, h = self.subframe
+                image = self.camera.raw_data[x-w//2:x+w//2,y-h//2:y+h//2]
+            else:
+                image = self.camera.raw_data
             
+            # if guiding is on, push process image and send to telescope, uses subframe
+            if self.guiding_active: 
+                self.guider.run(image)
+
             # Update GUI in main thread
             self.root.after(0, self._update_display, image)
             
         except Exception as e:
             self.root.after(0, self._show_error, str(e))
+
             
     def _update_display(self, image):
         """Update the display with new image"""
@@ -432,10 +547,11 @@ class CameraGUI:
         self.mean_flux_label.config(text=f"{mean_flux:.1f}")
         self.min_flux_label.config(text=f"{min_flux:.1f}")
         
-        # Simulate guide error if guiding active
+        # Shouw guide error if guiding active
         if self.guiding_active:
-            guide_error = np.random.uniform(0.1, 2.0)  # Simulated guide error in pixels
-            self.guide_error_label.config(text=f"{guide_error:.2f} px")
+            #guide_error = np.random.uniform(0.1, 2.0)  # Simulated guide error in pixels
+            guide_error = [self.guider.dx_arcs, self.guider.dy_arcs]
+            self.guide_error_label.config(text=f"{guide_error[0]:.2f} arcsec {guide_error[0]:.2f} arcsec")
         
         # Display image
         if hasattr(self, 'colorbar'):
@@ -455,6 +571,8 @@ class CameraGUI:
             self.ax.add_patch(self.subframe_rect)
         
         title_text = f"Exposure: {self.exposure_time:.1f}s | Peak: {peak_flux:.1f}"
+        if self.source_var.get():
+            title_text = f"{self.source_var.get()} | " + title_text
         if self.subframe_enabled:
             title_text += f" | Subframe: {self.subframe[2]}x{self.subframe[3]}"
         if self.guiding_active:
@@ -465,7 +583,6 @@ class CameraGUI:
         self.ax.set_ylabel("Y (pixels)")
         
         # Add colorbar
-
         self.colorbar = self.figure.colorbar(im, ax=self.ax, label='Counts')
         
         self.canvas.draw()
@@ -496,6 +613,7 @@ class CameraGUI:
                 self.status_label.config(text="Ready", foreground="green")
 
 
+
 def main():
     """Main function to run the GUI"""
     root = tk.Tk()
@@ -505,3 +623,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

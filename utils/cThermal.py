@@ -13,7 +13,7 @@ import logging, yaml
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-config_file = str(Path.cwd().resolve().parent / "config" / "thermal.yaml")
+config_file = str(Path(__file__).resolve().parent.parent / "config" / "thermal.yaml")
 
 
 class cThermal:
@@ -40,7 +40,6 @@ class cThermal:
         
     def connect(self):
         # Retrieve singleton reference to system object
-        # Replace 'COM4' with your Arduino's serial port
         try:
             serial_port = self.config['COM_Port']
             baud_rate   = self.config['baud_rate'] # should be 9600

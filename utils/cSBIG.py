@@ -9,6 +9,7 @@ import sys, os
 from pathlib import Path
 from cLogging import setup_logging
 import logging, yaml
+from datetime import datetime, timezone
 
 ERROR = True
 NOERROR = False
@@ -64,7 +65,7 @@ class cSBIG:
             self.logger.info("Exposing light frame...")
             self.CAMERA.Expose(exptime,1,0) # 0 is for no filter
             while not self.CAMERA.ImageReady:
-                time.sleep(1)
+                time.sleep(0.01)
             self.logger.info("Light frame exposure and download complete!")
         
         if exptype == 0:
@@ -72,9 +73,12 @@ class cSBIG:
             self.logger.info("Exposing Dark frame...")
             self.CAMERA.Expose(exptime,0,-1)
             while not self.CAMERA.ImageReady:
-                time.sleep(1)
+                time.sleep(0.01)
             self.logger.info("Dark frame exposure and download complete!")
         
+        self.last_time_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H.%M.%S.%f")
+        return True
+
         
     def setFrame(self,opt,l=0,b=0,r=0,t=0):
         """
@@ -106,7 +110,8 @@ class cSBIG:
             self.logger.error("ERROR: Invalid binning specified")
 
 
-    def saveImage(self,filename):
+    def saveImage(self):
+        filename = str(self.data_dir / f"sci_{self.source}_{self.last_time_tag}.fits")
         try:
             self.CAMERA.SaveImage(filename)
             self.logger.info("saved file to " + filename)
@@ -159,7 +164,7 @@ class cSBIG:
                     break
 
 
-    def shutDown(self):
+    def disconnect(self):
         if self.CAMERA.CoolerOn:
             # Warm up cooler
             if self.CAMERA.TemperatureSetpoint < self.CAMERA.AmbientTemperature:
@@ -243,7 +248,56 @@ class cSBIG:
         # Cool CDD
         if cooler == True:
             self.coolCCD()  
-            
+
+
+
+import os
+import time
+import array
+from alpaca.camera import *     # Sorry Python purists, this has multiple required Classes
+import numpy as np
+import astropy.io.fits as fits
+
+
+#
+#did not end up seeing gains in overhead with alpaca 
+class cSBIGalpaca:
+    def __init__():
+        pass
+        #
+        # Set up the camera
+        #
+        c = Camera('127.0.0.1:11111', 0)    # Connect to the ALpaca Omni Simulator
+        c.Connected = True
+        c.BinX = 1
+        c.BinY = 1
+        # Assure full frame after binning change
+        c.StartX = 0
+        c.StartY = 0
+        c.NumX = c.CameraXSize // c.BinX    # Watch it, this needs to be an int (typ)
+        c.NumY = c.CameraYSize // c.BinY
+
+        time0 = time.time()
+        c.StartExposure(0, True)
+        while not c.ImageReady:
+            time.sleep(0.001)
+            #print(f'{c.PercentCompleted}% complete')
+        print(time.time() - time0)
+        # takes about 0.93 seconds to take a dark image
+
+        #
+        # OK image acquired, grab the image array and the metadata
+        #
+        img = c.ImageArray
+        imginfo = c.ImageArrayInfo
+        if imginfo.ImageElementType == ImageArrayElementTypes.Int32:
+            if c.MaxADU <= 65535:
+                imgDataType = np.uint16 # Required for BZERO & BSCALE to be written
+            else:
+                imgDataType = np.int32
+        elif imginfo.ImageElementType == ImageArrayElementTypes.Double:
+            imgDataType = np.float64
+
 ##
 ##    END OF 'cCamera' Class
 ##

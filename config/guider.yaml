@@ -10,11 +10,10 @@ name: "Guider"
 file_format: "FITS"
 
 # for run_guiding telnet
-HOST_IP: 198.202.125.194
-PORT: 49200
+#HOST_IP: 198.202.125.194
+#PORT: 49200
 TIMEOUT: 100
 
-# for run_guiding centroiding details
-subframe: 1500
-ref_x: 0
-ref_y: 0
+# test IP
+HOST_IP: 127.0.0.1
+PORT: 5005

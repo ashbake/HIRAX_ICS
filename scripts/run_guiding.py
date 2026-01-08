@@ -14,7 +14,7 @@ from scipy import signal
 from PIL import Image
 
 sys.path.insert(0, str(Path.cwd().resolve().parent / "utils" ))
-from cGuider import cGuider
+from cFLIR import cFLIR
 
 # Parse User Inputs
 parser = argparse.ArgumentParser()
@@ -28,7 +28,7 @@ args = parser.parse_args()
 night = datetime.now(timezone.utc).strftime("%Y%m%d")
 
 
-class Guiding(cGuider):
+class Guiding(cFLIR):
     def __init__(self,night, source):
         super().__init__(night, source) # do this to get logger and config 
 
@@ -38,10 +38,6 @@ class Guiding(cGuider):
         self.ref_y = self.config['ref_y']
 
         self.subframe = self.config['subframe']
-
-        # telemetry file TODO 
-        #self.telemtry_path =  Path(self.config['data_dir']) / self.night / 'telemetry'
-        # self.telemetry_file = str(self.telemetry_path / f"guide_{self.source}_{self.last_time_tag}.txt")
 
     def _load_image(self,filename,subframe=500):
         """
@@ -217,7 +213,7 @@ class Guiding(cGuider):
 
 def main():
     # setup
-    camera = cGuider(night, args.source)
+    camera = cFLIR(night)
     exp_time =  float(args.exp_time) * 1e6
     guiding  =  Guiding(night, args.source)
 
@@ -230,7 +226,7 @@ def main():
             while True:
                 # Step 1 Capture image
                 header_keys = guiding.get_telemtry()
-                camera.expose(exp_time, header_keys) # takes microseconds, header keys goes into fits header
+                camera.expose(exp_time, args.source, header_keys) # takes microseconds, header keys goes into fits header
                 
                 # Step 2: Calculation and Push Offset to telescope
                 guiding.run(camera.raw_data)

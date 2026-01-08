@@ -12,14 +12,16 @@ import logging, yaml
 from typing import List
 
 # load ocean direct code here TODO: move where it lives
-sys.path.insert(0, str(Path.cwd() / "telluric" ))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent/  "utils/telluric" ))
+
+
 from oceandirect.OceanDirectAPI import OceanDirectAPI, OceanDirectError, Spectrometer
 
 # Functions useful for reading spectra from the Ocean Insight HR4Pro spectrometer
 odapi = OceanDirectAPI()
 
 # default config file
-config_file = str(Path.cwd().resolve().parent / "config" / "h4rpro.yaml")
+config_file = str(Path(__file__).resolve().parent.parent / "config" / "h4rpro.yaml")
 
 
 class cH4RPro:
@@ -32,6 +34,8 @@ class cH4RPro:
         self.source    = source # feed it a source string for the header
         self.night     = night # YYYYMMDD
         self.name      = self.config['name'] # should be H4Rpro
+
+        self.custom_wavelength = self.config['custom_wavelength']
 
         # make data and log dirs have sub direction of night string
         self.data_dir = Path(self.config['data_dir']) / self.night / self.name
@@ -46,7 +50,7 @@ class cH4RPro:
                                     log_level=logging.DEBUG)
         
 
-    def connect(self,custom_wavelength=False):
+    def connect(self):
         """find serial number of device and connect. 
         Also store key device properties.
         
@@ -71,12 +75,14 @@ class cH4RPro:
         spectrometer_advanced = Spectrometer.Advanced(self.device)
         self.nonlinearity_coeffs   = spectrometer_advanced.get_nonlinearity_coeffs()
         
-        if custom_wavelength: 
+        if self.custom_wavelength: 
             self.wavelength_coeffs = self._get_custom_wavelength_coeffs()
             self.logger.info('Using custom wavelength coefficients for H4RPro')
+            
         else:
             self.wavelength_coeffs = spectrometer_advanced.get_wavelength_coeffs()
             self.logger.warning('Using old wavelength coefficients for H4RPro')
+            print(self.wavelength_coeffs)
 
     def disconnect(self):
         self.device.close_device()
@@ -194,9 +200,3 @@ if __name__ == '__main__':
     wl, flx = h4rpro.read_spectra(integrationTimeUs, spectraToRead)
     h4rpro.disconnect()
 
-    # plot
-    plt.figure('telluricspectra')
-    offset=0.958 # calibrated it and need an added 0.74nm offset, but this may change over time
-    #plt.axvline(607.4)
-    plt.plot(wl-offset,np.median(flx,axis=0))
-    plt.xlabel('Wavelength')

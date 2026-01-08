@@ -11,7 +11,7 @@ import logging, yaml
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'
 
-config_file = str(Path.cwd().resolve().parent / "config" / "guider.yaml")
+config_file = str(Path(__file__).resolve().parent.parent / "config" / "guider.yaml")
 
 
 class cFLIR:
@@ -331,7 +331,8 @@ class cFLIR:
                 # By default, GetNextImage will block indefinitely until an image arrives.
                 # In this example, the timeout value is set to [exposure time + 1000]ms to ensure that an image has enough time to arrive under normal conditions
                 image_result = self.cam.GetNextImage(timeout)
-                self.last_time_tag = datetime.utcnow().strftime("%Y-%m-%dT%H.%M.%S.%f")
+                self.last_time_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H.%M.%S.%f")
+
 
                 if image_result.IsIncomplete():
                     print('Image incomplete with image status %d...' % image_result.GetImageStatus())
