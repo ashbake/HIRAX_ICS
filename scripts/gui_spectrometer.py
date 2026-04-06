@@ -68,7 +68,7 @@ class SpectrometerGUI:
         
         # Source name
         ttk.Label(info_frame, text="Source:", font=("Arial", 10, "bold")).pack(side=tk.LEFT, padx=(20, 5))
-        self.source_var = tk.StringVar(value="dark")
+        self.source_var = tk.StringVar(value="test")
         self.source_entry = ttk.Entry(info_frame, textvariable=self.source_var, width=20)
         self.source_entry.pack(side=tk.LEFT, padx=5)
         
@@ -458,7 +458,8 @@ class SpectrometerGUI:
             exposure_sec = self.exposure_var.get()
             integration_time_us = int(exposure_sec * 1e6)
             num_spectra = self.num_spectra_var.get()
-            
+            self.h4rpro.source = self.source_var.get()
+
             # Acquire spectra
             wl, flx = self.h4rpro.read_spectra(integration_time_us, num_spectra)
             

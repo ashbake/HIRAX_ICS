@@ -13,6 +13,8 @@ from cThermal import cThermal
 parser = argparse.ArgumentParser()
 parser.add_argument('--interval', type=float, default=0,
                     help='Time between captures')
+parser.add_argument('--plot', type=bool, default=False,
+                    help='Whether to have plot running')
 args = parser.parse_args()
 
 # Determine night string for logging and folder creation
@@ -64,7 +66,9 @@ def main():
                 print(f"Reading thermal data {iter}", end='\r') 
 
                 # running plot of alldata
-                ShowData(test.alldata)
+                if args.plot:
+                    print('plotting',args.plot)
+                    ShowData(test.alldata)
         else:
             print('No Device at COM Port %s Detected' %test.config['COM_Port']) 
     except KeyboardInterrupt:
