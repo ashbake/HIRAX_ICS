@@ -8,3 +8,5 @@
 *pdf
 *xlsx
 ./thermal/*xlsx
+utils/__pychache__
+*pyc

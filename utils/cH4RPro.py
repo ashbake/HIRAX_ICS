@@ -1,6 +1,7 @@
 
+from email import header
 import os, csv, sys
-from datetime import datetime
+from datetime import datetime, timezone
 import time
 import numpy as np
 import matplotlib.pylab as plt
@@ -15,7 +16,7 @@ from typing import List
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent/  "utils/telluric" ))
 
 
-from oceandirect.OceanDirectAPI import OceanDirectAPI, OceanDirectError, Spectrometer
+from oceandirect.OceanDirectAPI import OceanDirectAPI, OceanDirectError, Spectrometer, FeatureID
 
 # Functions useful for reading spectra from the Ocean Insight HR4Pro spectrometer
 odapi = OceanDirectAPI()
@@ -26,6 +27,15 @@ config_file = str(Path(__file__).resolve().parent.parent / "config" / "h4rpro.ya
 
 class cH4RPro:
     def __init__(self,night, source, config_file=config_file):
+        """
+        inputs
+        ------
+        night (str): string for night of observation, used for logging and folder creation, format
+            YYYYMMDD
+        source (str): string for name of target, used for logging and folder creation
+        config_file (str): path to config file, default is utils/config/h4rpro.yaml
+        
+        """
         # Define attributes
         # read from config file, loads default config_file
         with open(config_file, 'r') as f:
@@ -75,6 +85,21 @@ class cH4RPro:
         spectrometer_advanced = Spectrometer.Advanced(self.device)
         self.nonlinearity_coeffs   = spectrometer_advanced.get_nonlinearity_coeffs()
         
+        # Set to software trigger mode to ensure fresh spectra on each get_formatted_spectrum call
+        try:
+            self.device.set_trigger_mode(0)  # 0 = software trigger
+            self.logger.info("Set spectrometer to software trigger mode")
+        except Exception as e:
+            self.logger.warning(f"Could not set trigger mode: {e}")
+        
+        # Clear data buffer if supported
+        try:
+            if self.device.is_feature_id_enabled(FeatureID.DATA_BUFFER):
+                spectrometer_advanced.clear_data_buffer()
+                self.logger.info("Cleared data buffer")
+        except Exception as e:
+            self.logger.warning(f"Could not clear data buffer: {e}")
+        
         if self.custom_wavelength: 
             self.wavelength_coeffs = self._get_custom_wavelength_coeffs()
             self.logger.info('Using custom wavelength coefficients for H4RPro')
@@ -117,7 +142,16 @@ class cH4RPro:
         return serialNumberList
 
     def correct_nonlinearity(self,raw_intensity, nonlinearity_coeffs):
-        """Corrects for nonlinearity using the coefficients provided by the spectrometer."""
+        """Corrects for nonlinearity using the coefficients provided by the spectrometer.
+        
+        inputs
+        ------
+        raw_intensity (List): List of raw intensity values from the spectrometer.
+        nonlinearity_coeffs (List): List of coefficients for the nonlinearity correction.
+        
+        outputs
+        -------
+        corrected_intensity (List): List of corrected intensity values."""
         raw_intensity = np.array(raw_intensity, dtype=float)
         corrected_intensity = raw_intensity.copy()
         # corrected_intensity = np.array(corrected_intensity)
@@ -128,13 +162,14 @@ class cH4RPro:
         return corrected_intensity
 
     def writeSpectraToCSV(self,wavelengths: List, spectra: List, output_file_name: str) -> None:
-        """
-        Writes the wavelengths and spectra to a CSV file.
+        """Writes the wavelengths and spectra to a CSV file.
         
-        Parameters:
+        inputs:
+        -------
         wavelengths (List): List of wavelengths.
         spectra (List): List of spectra, where each spectrum is a List of intensity values.
         output_file_name (str): The name of the output CSV file.
+
         """
         self.logger.info("Writing H4RPRO data to %s"%output_file_name)
         # Create the CSV file
@@ -143,16 +178,37 @@ class cH4RPro:
             csv_writer = csv.writer(csvfile)
             
             # Write the header
-            header = ['Wavelength'] + [f'Spectrum_{i+1}' for i in range(len(spectra))]
-            csv_writer.writerow(header)
-            
+            header1 = ['#TimeUTC: ' + datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")]
+            header2a = [f"#SourceName: {self.source}"]
+            header2b = [f"#IntegrationTimeUs: {self.integrationTimeUs}"]
+            header2c = [f"#CustomWavelength: {self.custom_wavelength}"]
+            header2d = [f"#WavelengthCoeffs: {self.wavelength_coeffs}"]
+            header3 = ['#WavelengthNm'] + [f'Spectrum_{i+1},' for i in range(len(spectra))]
+            csv_writer.writerow(header1)
+            csv_writer.writerow(header2a)
+            csv_writer.writerow(header2b)
+            csv_writer.writerow(header2c)
+            csv_writer.writerow(header2d)
+            csv_writer.writerow(header3)
+
             # Write the data rows
             for i in range(len(wavelengths)):
                 row = [wavelengths[i]] + [spectrum[i] for spectrum in spectra]
                 csv_writer.writerow(row)
 
     def correct_spectrum(self,raw_spectrum, wavelength_coeffs, nonlinearity_coeffs):
-        """Corrects the spectrum for nonlinearity and converts pixel values to wavelengths."""
+        """Corrects the spectrum for nonlinearity and converts pixel values to wavelengths.
+        
+        inputs
+        ------
+        raw_spectrum (List): List of raw intensity values from the spectrometer.
+        wavelength_coeffs (List): List of coefficients for the wavelength calibration.
+        nonlinearity_coeffs (List): List of coefficients for the nonlinearity correction.
+       
+        outputs
+        -------
+        wavelengths (List): List of wavelengths corresponding to each pixel.
+        correct_spectrum (List): List of corrected intensity values."""
         c = wavelength_coeffs
         num_data_points = len(raw_spectrum) # 3648
 
@@ -167,18 +223,30 @@ class cH4RPro:
         """The main function to take spectral data. 
         Will use the calibration parameters to match wavelengths and correct nonlinearity, 
         then takes a certain number of exposures with a given exposure time in microseconds. 
+
+        inputs
+        ------
+        integrationTimeUs (int): exposure time in microseconds
+        spectraToRead (int): number of spectra to read and save
+
+        outputs
+        -------
+        wavelengths (List): list of wavelengths corresponding to each pixel
+        all_spectra (List): list of spectra, where each spectrum is a list of intensity values corresponding to the wavelengths
         """
+        self.integrationTimeUs = integrationTimeUs
         all_spectra = [[] for _ in range(spectraToRead)]
         self.device.set_integration_time(integrationTimeUs)
         for i in range(spectraToRead):
             self.logger.info("Reading and correcting H4RPRO Spectrum")
             raw_spectrum = self.device.get_formatted_spectrum()
+            #print(np.shape(raw_spectrum))
             wavelengths, spectrum = self.correct_spectrum(raw_spectrum, self.wavelength_coeffs, self.nonlinearity_coeffs)
             all_spectra[i] = spectrum
-            time.sleep(0.1)
+            time.sleep(0.2) # small delay between reads to ensure device is ready
 
         # save name of CSV for spectrum
-        self.last_time_tag = datetime.utcnow().strftime("%Y-%m-%dT%H.%M.%S.%f")
+        self.last_time_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H.%M.%S.%f")
         self.csv_file_name  = Path(self.data_dir)  / f"{self.last_time_tag}_{self.source}.csv"
     
         # save
@@ -189,7 +257,7 @@ class cH4RPro:
 
 
 if __name__ == '__main__':
-    night = datetime.utcnow().strftime("%Y%m%d")
+    night = datetime.now(timezone.utc).strftime("%Y%m%d")
     h4rpro  = cH4RPro(night=night, source='dark')#,config=config)
     h4rpro.connect()
 

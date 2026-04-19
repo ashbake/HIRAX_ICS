@@ -137,7 +137,7 @@ class ThermalApp(tk.Tk):
         self.ax_power.set_xlabel("Elapsed time (s)", fontsize=8, color=self.DIM)
 
     def _build_readout(self):
-        """Row showing the three latest temperatures and the save filename."""
+        """Row showing the latest temperatures and the save filename."""
         row = tk.Frame(self, bg=self.BG)
         row.pack(fill="x", padx=18, pady=4)
 
@@ -146,6 +146,7 @@ class ThermalApp(tk.Tk):
             ("Input 1", self.GREEN),
             ("Input 2", self.AMBER),
             ("Input 3", self.BLUE),
+            ("Room", self.TEXT),
         ]
         self._temp_vars = []
         for label, color in tile_cfg:
@@ -254,7 +255,7 @@ class ThermalApp(tk.Tk):
         alldata = self.thermal.alldata        # dict of lists
 
         # ── Temperature tiles ─────────────────────────────────────────────────
-        keys = ["input1", "input2", "input3"]
+        keys = ["input1", "input2", "input3", "temp5"]
         for var, key in zip(self._temp_vars, keys):
             vals = alldata.get(key, [])
             if vals:

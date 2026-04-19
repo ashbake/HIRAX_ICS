@@ -1,6 +1,7 @@
 
 import logging, os
 from pathlib import Path
+from astropy.time import Time
 import numpy as np
 from astropy.io import fits
 from datetime import datetime, timezone
@@ -83,9 +84,11 @@ class cThermal:
 
         inputs:
         -------
-        data - 'str'
+        rawdata - 'str'
             raw data from serial read out
-        
+        alldata - 'dict'
+            dictionary of lists with all previous data, will append new data to this
+            
         outputs
         -------
         labeled in cats
@@ -117,7 +120,7 @@ class cThermal:
 
         inputs
         ------
-        filePath - str
+        output_file_name - str
             path and filename to save to
         data - str
             data to write, should contain line break and delimiters already
@@ -125,13 +128,15 @@ class cThermal:
         output_file = os.path.join(self.data_dir, output_file_name)
         if not (os.path.isfile(output_file)):
             file = open(output_file, 'w')
-            hdr = '#elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,'\
+            hdr = '#utc_jd, elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,'\
                     'temp3a, temp3b, temp5, temp8, temp9, temp10\n'
             file.write(hdr)
         else:
             file = open(output_file, 'a')
-        
-        file.write(data)
+        # write first entry of line to be date in jd format
+        currenttime_utc_jd = Time(datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")).jd
+        file.write(f"{currenttime_utc_jd}, ")
+        file.write(data + '\n')
 
         file.close()
 

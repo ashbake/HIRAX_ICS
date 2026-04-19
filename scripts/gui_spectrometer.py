@@ -31,7 +31,6 @@ class SpectrometerGUI:
         # Parameters
         self.exposure_time = 0.02  # seconds
         self.num_spectra = 5
-        self.wavelength_offset = 0.958  # nm (hardcoded, not user-adjustable)
         self.connected = False
         self.capturing = False
         self.continuous_mode = False
@@ -150,7 +149,7 @@ class SpectrometerGUI:
         self.wl_range_check.grid(row=1, column=0, columnspan=2, padx=5, pady=5, sticky=tk.W)
         
         ttk.Label(control_frame, text="Min (nm):").grid(row=1, column=2, padx=5, pady=5, sticky=tk.E)
-        self.wl_min_var = tk.DoubleVar(value=400)
+        self.wl_min_var = tk.DoubleVar(value=580)
         self.wl_min_spinbox = ttk.Spinbox(
             control_frame,
             from_=300,
@@ -163,7 +162,7 @@ class SpectrometerGUI:
         self.wl_min_spinbox.grid(row=1, column=3, padx=5, pady=5, sticky=tk.W)
         
         ttk.Label(control_frame, text="Max (nm):").grid(row=1, column=4, padx=5, pady=5, sticky=tk.E)
-        self.wl_max_var = tk.DoubleVar(value=800)
+        self.wl_max_var = tk.DoubleVar(value=600)
         self.wl_max_spinbox = ttk.Spinbox(
             control_frame,
             from_=300,
@@ -338,7 +337,7 @@ class SpectrometerGUI:
                 self.background_data = np.load(filepath)
             elif filepath.suffix == '.csv':
                 # Text format (assume wavelength, flux columns)
-                data = np.loadtxt(filepath,skiprows=1,delimiter=',')
+                data = np.loadtxt(filepath,skiprows=6,delimiter=',')
                 if data.ndim >= 2:
                     # Assume second column and after is flux. average if multiple
                     self.background_data = np.mean(data[:, 1:],axis=1)
@@ -463,14 +462,11 @@ class SpectrometerGUI:
             # Acquire spectra
             wl, flx = self.h4rpro.read_spectra(integration_time_us, num_spectra)
             
-            # Apply wavelength offset (hardcoded)
-            wl_corrected = wl - self.wavelength_offset
-            
-            # Calculate median (or mean)
-            averaged_flux = np.median(flx, axis=0)
+            # Calculate mean
+            averaged_flux = np.mean(flx, axis=0)
             
             # Store data
-            self.current_wl = wl_corrected
+            self.current_wl = wl
             self.current_flux = flx
             self.averaged_flux = averaged_flux
             
