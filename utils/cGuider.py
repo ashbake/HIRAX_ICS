@@ -2,7 +2,8 @@ from datetime import datetime,timezone
 import numpy as np
 import sys
 from pathlib import Path
-import telnetlib
+#import telnetlib
+import socket
 from scipy import signal
 from PIL import Image
 
@@ -12,16 +13,22 @@ from cFLIR import cFLIR
 
 class cGuider(cFLIR):
     def __init__(self,night):
-        super().__init__(night) # do this to get logger and config 
+        super().__init__(night) # do this to get logger and config
 
         self.logger.info('Trying to connect to TCS')
+        self.centroid_method = 'std'  # 'std' (marginal std) or 'com' (center of mass)
 
     def connect(self):
-        """connect camera parent and make telnet connection"""
+        """connect to TCS via TCP socket"""
+        self.session = None
         try:
-            self.session  = telnetlib.Telnet(self.config['HOST_IP'],self.config['PORT'],self.config['TIMEOUT'])
-        except:
-            self.logger.error(f"Couldnt make telnet connection to HOST {self.config['HOST_IP']} at port {self.config['PORT']}")
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.config['TIMEOUT'])
+            sock.connect((self.config['HOST_IP'], self.config['PORT']))
+            self.session = sock
+            self.logger.info(f"Connected to TCS at {self.config['HOST_IP']}:{self.config['PORT']}")
+        except Exception as e:
+            self.logger.error(f"Couldn't connect to TCS at {self.config['HOST_IP']}:{self.config['PORT']}: {e}")
 
     def _load_image(self,filename,subframe=500):
         """
@@ -39,28 +46,56 @@ class cGuider(cFLIR):
 
         return f[xcent-r:xcent+r,ycent-r:ycent+r]
 
-    def _find_centroid(self,data):
-        """
-        Input: loaded data, Output: x,y center of aperture
+    def _find_centroid(self, data):
+        """Dispatch to the selected centroid algorithm (set via self.centroid_method)."""
+        if self.centroid_method == 'com':
+            return self._find_centroid_com(data)
+        return self._find_centroid_std(data)
 
-        **assumes no other source in frame (or at least that source of interest is the brightest!!)***
+    def _find_centroid_std(self, data):
         """
-        # Convolve image with gaussian kernel
-        kernel = np.outer(signal.windows.gaussian(70,8), signal.windows.gaussian(70,8))
+        Marginal standard-deviation centroid.
+        Blurs the image then finds the column/row with the highest variance.
+        Robust to noise but assumes one dominant source and image size >= 300 px.
+        """
+        kernel = np.outer(signal.windows.gaussian(70, 8), signal.windows.gaussian(70, 8))
         blurred = signal.fftconvolve(data, kernel, mode='same')
 
-        # Take the normalized STD along x,y axes
-        xstd = np.std(blurred,axis=0)
-        ystd = np.std(blurred,axis=1)
-        xstdn = (xstd - np.median(xstd[100:300]))/max(xstd)
-        ystdn = (ystd - np.median(ystd[100:300]))/max(ystd)
+        xstd = np.std(blurred, axis=0)
+        ystd = np.std(blurred, axis=1)
 
-        # Determine center by maximum. Eventually add check that there's only one source!
-        try: x,y = np.where(xstdn == max(xstdn))[0][0], np.where(ystdn == max(ystdn))[0][0]
+        # Subtract background estimated from a central strip, normalise
+        bg_cols = min(100, len(xstd) // 4)
+        bg_rows = min(100, len(ystd) // 4)
+        xstdn = (xstd - np.median(xstd[bg_cols : bg_cols * 3])) / max(xstd)
+        ystdn = (ystd - np.median(ystd[bg_rows : bg_rows * 3])) / max(ystd)
+
+        try:
+            x = np.where(xstdn == max(xstdn))[0][0]
+            y = np.where(ystdn == max(ystdn))[0][0]
         except IndexError:
-            x,y = 0,0
+            x, y = data.shape[1] // 2, data.shape[0] // 2
 
-        return x,y
+        return x, y
+
+    def _find_centroid_com(self, data):
+        """
+        Center-of-mass centroid.
+        Subtracts a background (median) then computes flux-weighted mean position.
+        More accurate than marginal-std for isolated point sources; sensitive to
+        background subtraction quality if multiple sources are present.
+        """
+        background = np.median(data)
+        d = np.maximum(data.astype(float) - background, 0)
+        total = np.sum(d)
+
+        if total == 0:
+            return data.shape[1] // 2, data.shape[0] // 2
+
+        rows, cols = np.indices(data.shape)
+        x = int(round(np.sum(cols * d) / total))
+        y = int(round(np.sum(rows * d) / total))
+        return x, y
 
     def _calc_offset(self,xcentroid,ycentroid,Nx, Ny,xref=0,yref=0):
         """
@@ -116,13 +151,30 @@ class cGuider(cFLIR):
         plate_scale = self._calc_plate_scale(mag=1.5) # arsec/pixel
         return dx * plate_scale, dy * plate_scale
 
+    def _send_command(self, cmd, bufsize=4096):
+        """Send a command string over the socket and return the response."""
+        if self.session is None:
+            raise ConnectionError("TCS socket is not connected")
+        self.session.sendall(cmd.encode('ascii'))
+        return self.session.recv(bufsize).decode('ascii')
+
+    def expose(self, exposure_time, header_keys={}, source="", writeToFile=True, subframe=None):
+        """Wrap cFLIR.expose to inject TCS telemetry into the FITS header."""
+        merged = dict(header_keys)
+        try:
+            merged.update(self.get_telemetry())
+        except Exception as e:
+            self.logger.warning(f"Could not fetch TCS telemetry for header: {e}")
+        super().expose(exposure_time, header_keys=merged, source=source,
+                       writeToFile=writeToFile, subframe=subframe)
+
     def disconnect(self):
-        """disconnect all - telnet and camera"""
+        """disconnect socket"""
         try:
             self.session.close()
-            self.logger.info('Closed telnet connection')
+            self.logger.info('Closed socket connection')
         except:
-            self.logger.warning("Coulnd't close telnet connection" )
+            self.logger.warning("Couldn't close socket connection")
         
         # disconnect camera
         #super().disconnect()
@@ -146,9 +198,9 @@ class cGuider(cFLIR):
         """
         EW_tcs = dy_arcs      # (up/down on guide image, short axis)
         NS_tcs = -1 * dx_arcs # (left/right on guide image, long axis)
-        cmd = 'PT %s %s \r' %(EW_tcs, NS_tcs)
+        cmd = 'PT %s %s\n' %(EW_tcs, NS_tcs)
 
-        out = self.session.write(cmd.encode('ascii'))
+        out = self._send_command(cmd)
         self.logger.info(f'Moved telescope by {EW_tcs} EW and {NS_tcs} NS')
         return out
 
@@ -210,22 +262,46 @@ class cGuider(cFLIR):
 
         """
         self.header_keys = {}
-        REQPOS = self.session.write('REQPOS'.encode('ascii'))
-        NAME   = self.session.write('NAME'.encode('ascii'))
 
-        # format
+        # --- REQPOS ---
+        REQPOS = self._send_command('REQPOS\r')
+        self.logger.debug(f"REQPOS raw: {REQPOS!r}")
         utclst, radecha, airmass = REQPOS.split('\n')
         utc, lst = utclst.split(',')
-        ra, dec, ha  = radecha.split(',')
+        ra, dec, ha = radecha.split(',')
+        self.header_keys['UTC']     = utc.strip('UTC =')
+        self.header_keys['LST']     = lst.strip(' LST =')
+        self.header_keys['RA']      = ra.strip('RA =')
+        self.header_keys['DEC']     = dec.strip('DEC =')
+        self.header_keys['HA']      = ha.strip(' HA =')
+        self.header_keys['AIRMASS'] = airmass.strip('air mas=').strip('\x00')
 
-        # save
-        self.header_keys['name'] = NAME.strip('\n').strip('NAME =') # TODO check all this works with real TCS output
-        self.header_keys['UTC'] = utc.strip('UTC =')
-        self.header_keys['LST'] = lst.strip(' LST =')
-        self.header_keys['RA']  = ra.strip('RA =')
-        self.header_keys['DEC'] = dec.strip('DEC =')
-        self.header_keys['HA']  = ha.strip(' HA =')
-        self.header_keys['airmass']  = ra.strip('airmass =')
+        # --- NAME ---
+        NAME = self._send_command('NAME\r')
+        self.logger.debug(f"NAME raw: {NAME!r}")
+        self.header_keys['OBJECT'] = NAME.strip('\n').strip('NAME =')
+
+        # --- REQSTAT ---
+        # Response format:
+        #   UTC = ddd hh:mm:ss.s
+        #   telescope ID = NNN, focus = FF.FF mm, tube length = TT.TT mm
+        #   offset RA =   R.R arcsec, DEC =   D.D arcsec
+        #   rate RA =   R.R arcsec/hr, DEC =   D.D arcsec/hr
+        #   Cass ring angle = CCC.CC\x00
+        REQSTAT = self._send_command('REQSTAT\r')
+        self.logger.debug(f"REQSTAT raw: {REQSTAT!r}")
+        stat_lines = REQSTAT.split('\n')
+        tel_id_str, focus_str, tubelen_str = stat_lines[1].split(',')
+        off_ra_str,  off_dec_str  = stat_lines[2].split(',')
+        rate_ra_str, rate_dec_str = stat_lines[3].split(',')
+        self.header_keys['TELID']    = tel_id_str.split('=')[1].strip()
+        self.header_keys['FOCUS']    = focus_str.split('=')[1].strip().split()[0]
+        self.header_keys['TUBELEN']  = tubelen_str.split('=')[1].strip().split()[0]
+        self.header_keys['RAOFFSET'] = off_ra_str.split('=')[1].strip().split()[0]
+        self.header_keys['DECOFFST'] = off_dec_str.split('=')[1].strip().split()[0]
+        self.header_keys['RARATE']   = rate_ra_str.split('=')[1].strip().split()[0]
+        self.header_keys['DECRATE']  = rate_dec_str.split('=')[1].strip().split()[0]
+        self.header_keys['CASSANG']  = stat_lines[4].split('=')[1].strip().strip('\x00')
 
         return self.header_keys
     

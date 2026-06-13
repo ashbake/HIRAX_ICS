@@ -128,7 +128,7 @@ class cThermal:
         output_file = os.path.join(self.data_dir, output_file_name)
         if not (os.path.isfile(output_file)):
             file = open(output_file, 'w')
-            hdr = '#utc_jd, elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,'\
+            hdr = 'utc_jd, elapsed_time, in1, in2, in3, power1, power2, power3, temp1a, temp1b, temp2a, temp2b,'\
                     'temp3a, temp3b, temp5, temp8, temp9, temp10\n'
             file.write(hdr)
         else:

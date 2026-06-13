@@ -497,6 +497,9 @@ class SpectrometerGUI:
         # Clear and plot
         self.ax.clear()
         self.ax.plot(self.current_wl, plot_flux, 'b-', linewidth=1.5)
+        self.ax.axvline(x=587.16495906, color='r', linestyle='--',alpha=0.5,lw=0.6)
+        self.ax.axvline(x=589.015, color='r', linestyle='--',alpha=0.5,lw=0.6)
+        self.ax.axvline(x=590.4, color='r', linestyle='--',alpha=0.5,lw=0.6)
         self.ax.set_xlabel('Wavelength (nm)', fontsize=12)
         self.ax.set_ylabel('Flux', fontsize=12)
         

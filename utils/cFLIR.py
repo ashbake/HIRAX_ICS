@@ -91,13 +91,13 @@ class cFLIR:
         except:
             self.logger.error('Could not disconnect camera')
 
-    def expose(self,exposure_time,header_keys={},source="",writeToFile=True):
+    def expose(self,exposure_time,header_keys={},source="",writeToFile=True, subframe=None):
         if not self._configure_exposure(exposure_time):
             return False
         header_keys['TARGET'] = source
 
         # Acquire images
-        if not self.acquire_images(header_keys, writeToFile): self.logger.warning('FLIR guider image acquisition Failed.')
+        if not self.acquire_images(header_keys, writeToFile, subframe): self.logger.warning('FLIR guider image acquisition Failed.')
 
         # Reset exposure
         self._reset_exposure()
@@ -281,7 +281,7 @@ class cFLIR:
 
         return result
 
-    def acquire_images(self,header_keys={},writeToFile=True):
+    def acquire_images(self,header_keys={},writeToFile=True, subframe=None):
         """
         This function acquires and saves images from a device; please see
         Acquisition example for more in-depth comments on the acquisition of images.
@@ -349,7 +349,7 @@ class cFLIR:
                     raw_data = self.image_converted.GetData().astype(np.uint16)
                     self.raw_data = raw_data.reshape(2160, 4096)
 
-                    if writeToFile:  self.writeToFile(header_keys)
+                    if writeToFile:  self.writeToFile(header_keys,subframe=subframe)
                     
                 # Release image
                 image_result.Release()
@@ -367,7 +367,7 @@ class cFLIR:
 
         return result
     
-    def writeToFile(self, header_keys={}):
+    def writeToFile(self, header_keys={}, subframe=None):
         """Save data to file
         
         uses pyspin functionalities to save as tiff or accesses data in 
@@ -388,12 +388,29 @@ class cFLIR:
         elif self.file_format=='FITS':
 
             filename = str(self.data_dir / f"guide_{source}_{self.last_time_tag}.fits")
-            hdu = fits.PrimaryHDU(self.raw_data)
+            if subframe is not None:
+                x, y, w, h = subframe   # x=col center, y=row center
+                image = self.raw_data[y-h//2:y+h//2, x-w//2:x+w//2]
+            else:
+                image = self.raw_data
+            
+            hdu = fits.PrimaryHDU(image)
 
             for key, value in self.device_info.items():
                 hdu.header[key] = value
             hdu.header['GTIME'] = self.last_time_tag
-            
+
+            # subframe settings
+            if subframe is not None:
+                x, y, w, h = subframe
+                hdu.header['SFENAB'] = (True,  'subframe enabled')
+                hdu.header['SFX']    = (x,     'subframe center X (col)')
+                hdu.header['SFY']    = (y,     'subframe center Y (row)')
+                hdu.header['SFW']    = (w,     'subframe width (pixels)')
+                hdu.header['SFH']    = (h,     'subframe height (pixels)')
+            else:
+                hdu.header['SFENAB'] = (False, 'subframe enabled')
+
             # add user input header keywords
             for hdr_key in header_keys.keys():
                 hdu.header[hdr_key] = header_keys[hdr_key]
