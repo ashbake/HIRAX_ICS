@@ -127,13 +127,13 @@ class cGuider(cFLIR):
         """
         return xcentroid - xref - Nx//2, ycentroid - yref - Ny//2
 
-    def _calc_plate_scale(self,mag=1.5,pixel_size=3.45):
+    def _calc_plate_scale(self,mag=1.95,pixel_size=3.45):
         """
         use focal lengths to calculate rough plate scale at guider
         mag: ratio of first lens to guide camera lens (150:100 or 150:80)
         pixel_size: pixel size in microns (3.45 for guider)
         """
-        mag = 150/80 # 150 is focal dist of guide lens, 80 mm is collimator
+        #mag = 150/100 # 150 is focal dist of guide lens, 80 mm is collimator
         # accidentally had 100 has focal distance of first lens
         F_pf = 16.76*10**3 # mm , Focal length Hale telescope
         ps_pf = 206265 / (16.76*10**3) # arcsec/mm  at prime focus
@@ -148,7 +148,7 @@ class cGuider(cFLIR):
         """
         convert pixel shift to arseconds using plate scale
         """
-        plate_scale = self._calc_plate_scale(mag=1.5) # arsec/pixel
+        plate_scale = self._calc_plate_scale(mag=1.95) # arsec/pixel
         return dx * plate_scale, dy * plate_scale
 
     def _send_command(self, cmd, bufsize=4096):
@@ -219,12 +219,16 @@ class cGuider(cFLIR):
         plt.arrow(xcent,ycent,-1*dx,-1*dy,length_includes_head=True,head_width=10)
         plt.pause(0.1)
 
-    def run(self,data,subframe=None,ploton=False):
+    def run(self,data,subframe=None,ploton=False,xref=0,yref=0,gain=0.5):
         """
         run centroid finder and push offset to telescope
         inputs:
         -------
-        data - guide camera image
+        data  - guide camera image
+        xref  - reference x pixel offset from center (default 0)
+        yref  - reference y pixel offset from center (default 0)
+        gain  - proportional gain applied to correction before sending to TCS (default 0.5)
+                values < 1 prevent runaway oscillation from latency/mechanical lag
         """
         # data comes from memory now, but can edit this later to load file if data is string(filename)
         #data = load_image(filename,subframe=subframe)
@@ -238,19 +242,18 @@ class cGuider(cFLIR):
 
         Nx,Ny = np.shape(self.subdata)
 
-        # compute reference offset from center to aim for ( for now 0,0 but can add function for DAR for example)
-        self.xref,self.yref = 0,0
-        
+        self.xref, self.yref = xref, yref
+
         # fit centroid offset in arcsec
         xcentroid, ycentroid = self._find_centroid(self.subdata)
         dx, dy               = self._calc_offset(xcentroid,ycentroid, Nx, Ny,self.xref,self.yref) # *** note: x plots as y axis in python
         self.dx_arcs, self.dy_arcs     = self._pixel_to_arcsec(dx,dy) 
 
         # send to TCS if less than 10 arcsec
-        if np.abs(self.dx_arcs) < 10 and np.abs(self.dx_arcs) < 10: 
-            self.offset_to_TCS(np.round(self.dx_arcs,2), np.round(self.dy_arcs,2)) #send this somewhere?
+        if np.abs(self.dx_arcs) < 10 and np.abs(self.dy_arcs) < 10:
+            self.offset_to_TCS(np.round(gain * self.dx_arcs,2), np.round(gain * self.dy_arcs,2))
 
-        if ploton: self.plot_summary(self.subdata,Nx//2,Ny//2,dx,dy,dx_arcs,dy_arcs)
+        if ploton: self.plot_summary(self.subdata,xcentroid,ycentroid,dx,dy,self.dx_arcs,self.dy_arcs)
 
     def get_telemetry(self):
         """
@@ -277,9 +280,9 @@ class cGuider(cFLIR):
         self.header_keys['AIRMASS'] = airmass.strip('air mas=').strip('\x00')
 
         # --- NAME ---
-        NAME = self._send_command('NAME\r')
+        NAME = self._send_command('?NAME\r')
         self.logger.debug(f"NAME raw: {NAME!r}")
-        self.header_keys['OBJECT'] = NAME.strip('\n').strip('NAME =')
+        self.header_keys['OBJECT'] = NAME.split('=', 1)[-1].strip('\n').strip().strip('\x00').strip('\n')
 
         # --- REQSTAT ---
         # Response format:
@@ -301,7 +304,7 @@ class cGuider(cFLIR):
         self.header_keys['DECOFFST'] = off_dec_str.split('=')[1].strip().split()[0]
         self.header_keys['RARATE']   = rate_ra_str.split('=')[1].strip().split()[0]
         self.header_keys['DECRATE']  = rate_dec_str.split('=')[1].strip().split()[0]
-        self.header_keys['CASSANG']  = stat_lines[4].split('=')[1].strip().strip('\x00')
+        #self.header_keys['CASSANG']  = stat_lines[4].split('=')[1].strip().strip('\x00')
 
         return self.header_keys
     

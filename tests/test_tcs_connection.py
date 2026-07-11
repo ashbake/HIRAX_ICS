@@ -11,9 +11,10 @@ def test_reqpos():
         s.connect((HOST, PORT))
         print("Connected.")
 
-        s.sendall(b'REQSTAT\r')
-        response = s.recv(4096).decode('ascii')
-        print(f"Response:\n{response}")
+        s.sendall(b'?NAME\r')
+        response = s.recv(4096)
+        print(response)
+        print(f"Response:\n{response.decode('ascii')}")
 
 if __name__ == '__main__':
     test_reqpos()

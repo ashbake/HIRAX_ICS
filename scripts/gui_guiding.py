@@ -1,6 +1,6 @@
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
@@ -136,6 +136,8 @@ class CameraGUI:
         self.root.configure(bg=self.BG)
 
         self.exposure_time    = 0.01
+        self.guide_interval   = 1.0
+        self.guide_avg_frames = 1
         self.capturing        = False
         self.guiding_active   = False
         self.current_image    = None
@@ -264,6 +266,16 @@ class CameraGUI:
         self.centroid_combo.grid(row=2, column=7, padx=5, pady=3)
         self.centroid_combo.bind("<<ComboboxSelected>>", self._on_centroid_method_change)
 
+        ttk.Label(ctrl, text="Interval (s):").grid(row=2, column=8, padx=(15, 2), pady=3, sticky=tk.E)
+        self.interval_var = tk.DoubleVar(value=self.guide_interval)
+        ttk.Spinbox(ctrl, from_=0.0, to=30.0, increment=0.5,
+                    textvariable=self.interval_var, width=6).grid(row=2, column=9, padx=5, pady=3)
+
+        ttk.Label(ctrl, text="Avg frames:").grid(row=2, column=10, padx=(10, 2), pady=3, sticky=tk.E)
+        self.avg_frames_var = tk.IntVar(value=self.guide_avg_frames)
+        ttk.Spinbox(ctrl, from_=1, to=20, increment=1,
+                    textvariable=self.avg_frames_var, width=4).grid(row=2, column=11, padx=5, pady=3)
+
         # Row 3: scale
         ttk.Label(ctrl, text="Scale:").grid(row=3, column=0, padx=5, pady=3, sticky=tk.E)
         self.scale_var = tk.StringVar(value="Auto (99%)")
@@ -379,19 +391,37 @@ class CameraGUI:
             self.pixel_flux_label.config(text="N/A")
 
     def on_image_click(self, event):
-        """Left-click on image to set guide target (stores full-frame coords)."""
+        """Left-click on image to propose a new guide target (stores full-frame coords).
+
+        Requires explicit confirmation before the guider position is actually
+        changed, since an accidental click during active guiding would
+        otherwise silently redirect the TCS.
+        """
         if event.inaxes != self.ax or self.current_image is None or event.button != 1:
             return
         # event coords are full-frame because of imshow extent
         x, y = int(event.xdata + 0.5), int(event.ydata + 0.5)
         ix, iy = x - self._img_x_min, y - self._img_y_min
         h, w = self.current_image.shape
-        if 0 <= ix < w and 0 <= iy < h:
-            self.guide_target = (x, y)   # full-frame coords
-            self.target_label.config(text=f"Target: ({x}, {y})")
-            self.status_label.config(text=f"Guide target set to ({x}, {y}) — click again to change",
-                                     foreground=self.C_INFO)
-            self._redraw()
+        if not (0 <= ix < w and 0 <= iy < h):
+            return
+
+        confirmed = messagebox.askyesno(
+            "Confirm Guide Target Change",
+            f"Set guide target to pixel ({x}, {y})?\n\n"
+            "This will change the position the guider locks the star to.",
+            icon="warning",
+            parent=self.root,
+        )
+        if not confirmed:
+            self.status_label.config(text="Guide target change cancelled", foreground=self.C_WARN)
+            return
+
+        self.guide_target = (x, y)   # full-frame coords
+        self.target_label.config(text=f"Target: ({x}, {y})")
+        self.status_label.config(text=f"Guide target set to ({x}, {y}) — click again to change",
+                                 foreground=self.C_INFO)
+        self._redraw()
 
     # ── Display helpers ───────────────────────────────────────────────────────
 
@@ -546,19 +576,36 @@ class CameraGUI:
                 except Exception as e:
                     print(f"[telemetry ERROR] {type(e).__name__}: {e}")
             
-            header_keys['testing'] = '123'  # example of adding custom header key
+            header_keys['EXPTIME'] = self.exposure_time
 
-            self.camera.expose(self.exposure_time * 1e6,
-                               source=self.source_var.get(),
-                               writeToFile=self.write_var.get(),
-                               subframe=self.subframe if self.subframe_var.get() else None,
-                               header_keys=header_keys)
+            # Centroid from the previous guide cycle (lag of one cycle by necessity,
+            # since the centroid is computed after the frames are saved).
+            if (self.guiding_active and hasattr(self, 'guider')
+                    and hasattr(self.guider, 'xcentroid')):
+                header_keys['GDRXCEN'] = float(self.guider.xcentroid)
+                header_keys['GDRYCEN'] = float(self.guider.ycentroid)
 
-            if self.subframe_var.get():
-                x, y, w, h = self.subframe   # x=col center, y=row center
-                image = self.camera.raw_data[y - h//2:y + h//2, x - w//2:x + w//2]
-            else:
-                image = self.camera.raw_data
+            n_avg      = int(self.avg_frames_var.get()) if self.guiding_active else 1
+            write_file = self.write_var.get()
+            source     = self.source_var.get()
+            use_sub    = self.subframe_var.get()
+            sub        = self.subframe if use_sub else None
+
+            accumulated = None
+            for _ in range(n_avg):
+                self.camera.expose(self.exposure_time * 1e6,
+                                   source=source,
+                                   writeToFile=write_file,
+                                   subframe=sub,
+                                   header_keys=header_keys)
+                if use_sub:
+                    x, y, w, h = self.subframe
+                    frame = self.camera.raw_data[y - h//2:y + h//2, x - w//2:x + w//2]
+                else:
+                    frame = self.camera.raw_data
+                accumulated = frame.astype(float) if accumulated is None else accumulated + frame
+
+            image = (accumulated / n_avg).astype(frame.dtype)
 
             centroid = None
             target   = None
@@ -726,7 +773,8 @@ class CameraGUI:
         self.capturing = False
 
         if self.continuous_var.get() or self.guiding_active:
-            self.root.after(100, self.capture_image)
+            delay = int(self.interval_var.get() * 1000) if self.guiding_active else 100
+            self.root.after(delay, self.capture_image)
 
     def _show_error(self, error_msg):
         self.status_label.config(text=f"Error: {error_msg}", foreground=self.C_BAD)
