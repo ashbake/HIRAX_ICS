@@ -143,14 +143,14 @@ class CameraGUI:
         self.current_image    = None
         self.camera_connected = False
         self.source_name      = ""
-        self.guide_target     = None   # None = image center; always in full-frame coords
+        self.guide_target     = (1870, 1210)   # None = image center; always in full-frame coords
         self.last_centroid    = None   # cached for redraws (image/subframe coords)
         self.last_target      = None
         self._img_x_min       = 0     # full-frame col offset of displayed image origin
         self._img_y_min       = 0     # full-frame row offset of displayed image origin
 
         self.subframe_enabled = False
-        self.subframe         = [2048, 1080, 256, 256]   # [x_col_center, y_row_center, w, h]
+        self.subframe         = [1870, 1210, 256, 256]   # [x_col_center, y_row_center, w, h]
         self.full_frame_size  = [4096, 2160]
 
         self.current_night = datetime.now(timezone.utc).strftime("%Y%m%d")
@@ -253,7 +253,7 @@ class CameraGUI:
         ttk.Button(ctrl, text="Set Guide Target",
                    command=self.open_target_dialog).grid(row=2, column=3, padx=5, pady=3)
 
-        self.target_label = ttk.Label(ctrl, text="Target: image center", foreground=self.C_DIM)
+        self.target_label = ttk.Label(ctrl, text=f"Target: {self.guide_target}", foreground=self.C_DIM)
         self.target_label.grid(row=2, column=4, columnspan=2, padx=5, pady=3, sticky=tk.W)
 
         ttk.Label(ctrl, text="Centroid:").grid(row=2, column=6, padx=(15, 2), pady=3, sticky=tk.E)
@@ -593,11 +593,16 @@ class CameraGUI:
 
             accumulated = None
             for _ in range(n_avg):
+                # Never write individual frames here — writing to disk between
+                # exposures in this tight loop was stalling long enough to trip
+                # the camera's heartbeat timeout and disconnect it. Only the
+                # final averaged frame is saved, below.
                 self.camera.expose(self.exposure_time * 1e6,
                                    source=source,
-                                   writeToFile=write_file,
+                                   writeToFile=False,
                                    subframe=sub,
                                    header_keys=header_keys)
+                time.sleep(0.001)
                 if use_sub:
                     x, y, w, h = self.subframe
                     frame = self.camera.raw_data[y - h//2:y + h//2, x - w//2:x + w//2]
@@ -606,6 +611,14 @@ class CameraGUI:
                 accumulated = frame.astype(float) if accumulated is None else accumulated + frame
 
             image = (accumulated / n_avg).astype(frame.dtype)
+
+            if write_file:
+                avg_header = dict(header_keys)
+                avg_header['TARGET'] = source
+                avg_header['NAVG'] = (n_avg, 'number of frames averaged')
+                self.camera.writeArrayToFile(image, header_keys=avg_header,
+                                             subframe_meta=sub,
+                                             tag="_avg" if n_avg > 1 else "")
 
             centroid = None
             target   = None

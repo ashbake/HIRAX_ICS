@@ -93,14 +93,18 @@ class cFLIR:
 
     def expose(self,exposure_time,header_keys={},source="",writeToFile=True, subframe=None):
         if not self._configure_exposure(exposure_time):
-            return False
+            raise RuntimeError('Could not configure exposure time on FLIR guider camera')
         header_keys['TARGET'] = source
 
         # Acquire images
-        if not self.acquire_images(header_keys, writeToFile, subframe): self.logger.warning('FLIR guider image acquisition Failed.')
+        acquired = self.acquire_images(header_keys, writeToFile, subframe)
 
         # Reset exposure
         self._reset_exposure()
+
+        if not acquired:
+            self.logger.warning('FLIR guider image acquisition Failed.')
+            raise RuntimeError('FLIR guider image acquisition failed (incomplete frame or camera error) — camera may have disconnected')
 
     def _get_device_info(self):
         """
@@ -336,6 +340,7 @@ class cFLIR:
 
                 if image_result.IsIncomplete():
                     print('Image incomplete with image status %d...' % image_result.GetImageStatus())
+                    result = False
 
                 else:
                     # Print image information
@@ -419,6 +424,51 @@ class cFLIR:
             self.logger.info(f"Wrote guide image to {filename}")
         else:
             self.logger.error('File format in yaml file should be FITS or TIFF')
+
+    def writeArrayToFile(self, image, header_keys={}, subframe_meta=None, tag=""):
+        """Save an already-prepared image array (e.g. an average of several frames).
+
+        Unlike writeToFile(), this does not read from self.raw_data and does not
+        crop — pass in the image already at the size you want saved. subframe_meta
+        (x, y, w, h), if given, is recorded in the header only (no cropping applied).
+
+        inputs
+        ------
+        image (np.ndarray): image data to save
+        header_keys (dict): FITS header keywords to add
+        subframe_meta (tuple): (x, y, w, h) subframe center/size to record in the header
+        tag (str): extra string inserted into the filename, e.g. "_avg"
+        """
+        source = header_keys.get('TARGET', "")
+        self.last_time_tag = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H.%M.%S.%f")
+
+        if self.file_format != 'FITS':
+            self.logger.error('writeArrayToFile currently only supports FITS format')
+            return
+
+        filename = str(self.data_dir / f"guide_{source}{tag}_{self.last_time_tag}.fits")
+
+        hdu = fits.PrimaryHDU(image)
+
+        for key, value in self.device_info.items():
+            hdu.header[key] = value
+        hdu.header['GTIME'] = self.last_time_tag
+
+        if subframe_meta is not None:
+            x, y, w, h = subframe_meta
+            hdu.header['SFENAB'] = (True,  'subframe enabled')
+            hdu.header['SFX']    = (x,     'subframe center X (col)')
+            hdu.header['SFY']    = (y,     'subframe center Y (row)')
+            hdu.header['SFW']    = (w,     'subframe width (pixels)')
+            hdu.header['SFH']    = (h,     'subframe height (pixels)')
+        else:
+            hdu.header['SFENAB'] = (False, 'subframe enabled')
+
+        for hdr_key in header_keys.keys():
+            hdu.header[hdr_key] = header_keys[hdr_key]
+
+        hdu.writeto(filename)
+        self.logger.info(f"Wrote averaged guide image to {filename}")
 
 
 if __name__=='__main__':
